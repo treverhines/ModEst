@@ -1,0 +1,410 @@
+#!/usr/bin/env python
+import time as timemod
+import datetime
+import os
+import numpy as np
+import logging
+from functools import wraps
+import collections
+
+logger = logging.getLogger(__name__)
+
+
+def decyear_inv(decyear,format='%Y-%m-%dT%H:%M:%S'):
+  '''
+  convert decimal year to date
+  '''
+  year = int(np.floor(decyear))
+  remainder = decyear - year
+  year_start = datetime.datetime(year,1,1)
+  year_end = datetime.datetime(year+1,1,1)
+  days_in_year = (year_end - year_start).days
+  decdays = remainder*days_in_year
+  date = year_start + datetime.timedelta(days=decdays)
+  return date.strftime(format)
+
+
+def decyear(*args):
+  '''
+  converts date to decimal year
+  '''
+  date_tuple      = datetime.datetime(*args).timetuple()
+  time_in_sec     = timemod.mktime(date_tuple)
+  date_tuple      = datetime.datetime(args[0],1,1,0,0).timetuple()
+  time_year_start = timemod.mktime(date_tuple)
+  date_tuple      = datetime.datetime(args[0]+1,1,1,0,0).timetuple()
+  time_year_end   = timemod.mktime(date_tuple)
+  decimal_time    = (args[0] + (time_in_sec - time_year_start)
+                     /(time_year_end - time_year_start))
+  return decimal_time
+
+class Timer:
+  def __init__(self):
+    self.time_dict = collections.OrderedDict()
+    self.actime_dict = collections.OrderedDict()
+
+  def tic(self,ID=None):
+    if ID is None:
+      itr = 0
+      while True:
+        n = 'process %s' % itr
+        if not self.time_dict.has_key(n):
+          ID = n
+          break
+
+        itr += 1
+
+    if self.time_dict.has_key(ID):
+      logger.warning('%s is already being timed' % ID)
+      return 
+
+    if not self.actime_dict.has_key(ID):
+      self.actime_dict[ID] = 0.0
+
+    self.time_dict[ID] = timemod.time()
+
+    logger.debug('timing %s' % ID)
+
+  def toc(self,ID=None):
+    if ID is None:
+      ID = self.time_dict.keys()[-1]
+
+    curtime = timemod.time()
+    runtime = curtime - self.time_dict.pop(ID)
+    self.actime_dict[ID] += runtime
+
+    disp = '%.4g %s' % self.convert(runtime)
+    
+    logger.debug('elapsed time for last call to %s: %s' % (ID,disp))
+    return 'elapsed time for last call to %s: %s' % (ID,disp)
+
+  def summary(self):
+    while len(self.time_dict.keys()) > 0:
+      self.toc()
+
+    logger.info('---- TIME SUMMARY ----')
+    for i,val in self.actime_dict.iteritems():    
+      disp = '%.4g %s' % self.convert(val)
+      logger.info('total time running %s: %s' % (i,disp))
+
+  def convert(self,t):
+    unit = 's'
+    if t > 3600.0:
+      unit = 'hr'
+      t /= 3600.0
+
+    elif t > 60.0:
+      unit = 'min'
+      t /= 60.0
+
+    elif t < 1.0:
+      unit = 'ms'
+      t *= 1000.0
+
+    return t,unit
+
+
+GLOBAL_TIMER = Timer()
+
+
+def funtime(fun):
+  '''
+  decorator which times a function
+  '''
+  @wraps(fun)
+  def subfun(*args,**kwargs):
+    t = Timer()
+    GLOBAL_TIMER.tic(fun.__name__)
+    out = fun(*args,**kwargs)
+    GLOBAL_TIMER.toc(fun.__name__)
+    return out
+  return subfun
+
+
+def tic(*args,**kwargs):
+  return GLOBAL_TIMER.tic(*args,**kwargs)
+
+
+def toc(*args,**kwargs):
+  return GLOBAL_TIMER.toc(*args,**kwargs)
+
+
+def summary(*args,**kwargs):
+  return GLOBAL_TIMER.summary(*args,**kwargs)
+
+
+def _baseN_to_base10(value_baseN,base_char):
+  N = len(base_char)
+  value_baseN = str(value_baseN)  
+  base_char = base_char[:N]
+  assert all(i in base_char for i in value_baseN), (
+    'a character in the input does not exist in the base characters')
+
+  value_base10 = sum(base_char.find(i)*N**(n) for (n,i) in enumerate(value_baseN[::-1]))
+  return value_base10  
+
+
+def _base10_to_baseN(value_base10,base_char):
+  N = len(base_char)
+  value_baseN = ""
+  while value_base10 != 0:
+    value_baseN = base_char[value_base10%N] + value_baseN
+    value_base10 = value_base10//N
+  if len(value_baseN) == 0:
+    value_baseN = base_char[0]
+  return value_baseN
+
+
+def baseNtoM(value,N,M):
+  '''
+  converts an integer in base N to a value in base M
+
+  PARAMETERS
+  ----------
+    value: (integer or string) the integer value in base N whose 
+      characters must be a subset of the input base characters. If all the 
+      characters in this value are 0-9 then an integer can be given, otherwise, 
+      it must be a string.
+
+    N: (integer or string): Specifies the input base characters. if N is an 
+      integer then the base characters will be DEFAULT_CHARACTERS[:N]. Or the 
+      base characters can be specified as a string. For example, specifying N 
+      as '0123456789ABCDEF' will cause the input value to be treated as 
+      hexidecimal. Alternatively, specifying N as 16 will cause the input to be 
+      treated as hexidecimal.
+
+    M: (integer or string): Base of the output value. 
+
+  RETURNS
+  -------
+    value_baseM: a string of value_baseN converted to base M
+
+
+  DEFAULT_CHARACTERS='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+
+  '''
+  DEFAULT_CHARACTERS='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+  assert (type(N) == int) | (type(N) == str)
+  assert (type(M) == int) | (type(M) == str)
+  if type(N) is int:
+    assert len(DEFAULT_CHARACTERS) >= N,(
+      'integer values of N and M must be %s or smaller' %len(DEFAULT_CHARACTERS)) 
+    baseN_char = DEFAULT_CHARACTERS[:N]
+  else:
+    baseN_char = N
+
+  if type(M) is int:
+    assert len(DEFAULT_CHARACTERS) >= M, (
+      'integer values of N and M must be %s or smaller' %len(DEFAULT_CHARACTERS)) 
+    baseM_char = DEFAULT_CHARACTERS[:M]
+  else:  
+    baseM_char = M
+
+  assert len(baseN_char) > 1, (
+    'There must be more than 1 base character')
+  assert len(baseM_char) > 1, (
+    'There must be more than 1 base character')
+
+  value_base10 = _baseN_to_base10(value,baseN_char)
+  value_baseM = _base10_to_baseN(value_base10,baseM_char)
+  return value_baseM
+  
+
+def timestamp(factor=1.0):
+  '''
+  Description:
+  Returns base 36 value of output from time.time() plus a character
+  that identifies the computer this function was called from
+  '''
+  value_base10 = int(timemod.time()*factor)
+  return baseNtoM(value_base10,10,36)
+
+
+def listify(a):
+  '''
+  recursively convert an iterable into a list
+  '''
+  out = []
+  for i in a:
+    if hasattr(i,'__iter__'):
+      out += [listify(i)]
+    else:
+      out += [i]
+
+  return out
+
+
+def list_flatten(lst):
+  '''
+  recursively flatten an iterable into a 1D list
+  '''
+  lst = list(lst)
+  out = []
+  for sub in lst:
+    if hasattr(sub,'__iter__'):
+      out.extend(list_flatten(sub))
+    else:
+      out.append(sub)
+  return np.array(out)
+
+
+def divide_list(lst,N):
+  '''                               
+  Splits a list into N groups as evenly as possible         
+  '''
+  if len(lst) < N:
+    N = len(lst)
+  out = [[] for i in range(N)]
+  for itr,l in enumerate(lst):
+    out[itr%N] += [l]
+  return out
+
+
+def rotation3D(argZ,argY,argX):
+  '''                                
+  creates a matrix which rotates a coordinate in 3 dimensional space about the 
+  z axis by argz, the y axis by argy, and the x axis by argx, in that order  
+  '''
+  R1 = np.array([[  np.cos(argZ), -np.sin(argZ),           0.0],
+                 [  np.sin(argZ),  np.cos(argZ),           0.0],
+                 [           0.0,           0.0,           1.0]])
+
+  R2 = np.array([[  np.cos(argY),           0.0,  np.sin(argY)],
+                 [           0.0,           1.0,           0.0],
+                 [ -np.sin(argY),           0.0,  np.cos(argY)]])
+
+  R3 = np.array([[           1.0,           0.0,           0.0],
+                 [           0.0,  np.cos(argX), -np.sin(argX)],
+                 [           0.0,  np.sin(argX),  np.cos(argX)]])
+  return R1.dot(R2.dot(R3))
+
+
+def rotation_2d(argz):
+  return np.array([[  np.cos(argZ), -np.sin(argZ)],
+                   [  np.sin(argZ),  np.cos(argZ)]])
+
+
+def rotation_3d(argz,argy,argx):
+  return rotation3D(argz,argy,argx)
+
+
+def change_domain_basis(f,trans,argz,argy,argx,dz=1.0,dy=1.0,dx=1.0):
+  '''                    
+  Takes a function with domain in R3 and input points are defined with     
+  respect to the to the coordinate basis X* and returns the same     
+  function with input points defined with respect to the coordinate     
+  basis X.  The aditional arguments specify how to change from basis                          
+  X to basis X*                                     
+     
+  Parameters                                  
+  ----------        
+
+    f: function which takes a N*3 array of points with respect to  X* 
+
+    trans: Vector which translates X to X_o. X_o is an intermediary                          
+      basis which shares its origin with X*  
+
+    argz: angle about the z-axis in X_o which rotates X_o into X_z                       
+      (X_z is an intermediary basis)            
+
+    argy: angle about the y-axis in X_z which rotates X_z into X_y                           
+      (X_y is an intermediary basis)    
+                         
+    argx: angle about the x-axis in X_y which rotates X_y into X*
+
+    dx,dy,dz: additional scaling to stretch the x y and z axis 
+     
+  Returns                           
+  -------                                          
+
+    fout: function which takes input with respect to X                            
+
+  '''
+  def fout(x,*args,**kwargs):
+    assert np.shape(x)[1] == 3
+    x = x - trans
+    R = rotation_3d(argz,argy,argx).transpose()
+    x = np.einsum('ij,kj->ki',R,x)
+    x[:,0] /= dx
+    x[:,1] /= dy
+    x[:,2] /= dz
+    return f(x,*args,**kwargs)
+
+  return fout
+
+
+def find_indices(domain,realizations):
+  '''  
+  returns an array of indices such that domain[indices[n]] == realizations[n]
+  '''
+  if not hasattr(domain,'index'):
+    domain = list(domain)
+
+  if not hasattr(realizations,'index'):
+    realizations = list(realizations)
+  
+  domain_set = set(domain)
+  realizations_set = set(realizations)
+  if len(domain_set) != len(domain):
+      raise ValueError('domain contains repeated values')
+
+  if not realizations_set.issubset(domain_set):
+    intersection = realizations_set.intersection(domain_set)
+    not_in_domain = realizations_set.difference(intersection)
+    for i in not_in_domain:
+      raise ValueError('item %s not found in domain' % i)
+
+  indices = [domain.index(r) for r in realizations]
+  return indices
+
+
+def pad(M,pad_shape,value=0,dtype=None):
+  '''
+  returns an array containing the values from M but the ends of each dimension
+  are padded with 'value' so that the returned array has shape 'pad_shape'
+  '''
+  M = np.array(M)
+  M_shape = np.shape(M)
+
+  assert len(M_shape) == len(pad_shape), ('new_shape must have the same '
+         'number of dimensions as M') 
+  assert all([m <= n for m,n in zip(M_shape,pad_shape)]), ('length of each new '
+         'dimension must be greater than or equal to the corresponding '
+         'dimension of M')
+
+  if dtype is None:
+    dtype = M.dtype
+
+  out = np.empty(pad_shape,dtype=dtype)
+  out[...] = value
+ 
+  if not all(M_shape):
+    return out
+
+  M_dimension_ranges = [range(m) for m in M_shape]
+  out[np.ix_(*M_dimension_ranges)] = M
+
+  return out
+
+
+def pad_stack(arrays,axis=0,**kwargs):
+  '''
+  stacks array along the specified dimensions and any inconsistent dimension
+  sizes are dealt with by padding the smaller array with 'value'  
+  '''
+  array_shapes = [np.shape(a) for a in arrays]
+  array_shapes = np.array(array_shapes)
+  pad_shape = np.max(array_shapes,0)
+  padded_arrays = []
+  for a in arrays:
+    a_shape = np.shape(a)
+    pad_shape[axis] = a_shape[axis]     
+    padded_arrays += [pad(a,pad_shape,**kwargs)]
+  
+  out = np.concatenate(padded_arrays,axis=axis)
+
+  return out
+    
+
+
+      

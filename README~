@@ -1,0 +1,8 @@
+ModEst - Model estimation package for inverse problems
+
+The flagship function for this package is modest.nllstsq.nonlin_lstsq,
+which is a nonlinear least-squares solver.  It performs the same
+operations as scipy.optimize.curve_fit and includes a great of
+regularization options.  See the documentation for nonlin_lstsq for
+more information
+ 
