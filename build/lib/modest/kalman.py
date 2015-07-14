@@ -32,14 +32,8 @@ def iekf_update(system,
   appropriately augmenting the observation function, observation
   Jacobian, and data.
  
-  Note
-  ----
-  
-    The algorithm terminates based on the absolute value or the
-    relative value of the residual L2 norm, which does not account for
-    the data uncertainty.  This should not have any appreciable impact
-    on the solution
-  
+
+
   References
   ----------
   
@@ -62,13 +56,17 @@ def iekf_update(system,
   if regularization is None:
     regularization = np.zeros((0,len(prior)))
 
-  conv = Converger(atol,rtol,maxitr)
   eta = np.copy(prior)
   reg = np.asarray(regularization)
   prior = np.asarray(prior)
   data = np.asarray(data)
   Cdata = scipy.linalg.block_diag(Cdata,
                                   np.eye(len(reg)))
+
+  def norm(r):
+    return r.dot(Cdata).dot(r)     
+
+  conv = Converger(atol,rtol,maxitr,norm=norm)
 
   pred = system(eta,
                 *system_args,
@@ -77,7 +75,7 @@ def iekf_update(system,
   res = np.hstack((res,
                    -reg.dot(eta)))
 
-  status,message = conv.check(res)
+  status,message = conv.check(res,set_residual=True)
   if status == 0:
     logger.info('initial guess ' + message)
 
@@ -91,7 +89,7 @@ def iekf_update(system,
     H = np.vstack((H,reg))
     K = Cprior.dot(H.transpose()).dot(
           np.linalg.inv(
-          H.dot(Cprior).dot(H.transpose()) + Cdata))
+            H.dot(Cprior).dot(H.transpose()) + Cdata))
 
     eta = prior + K.dot(res - H.dot(prior - eta))
     pred = system(eta,
@@ -100,14 +98,12 @@ def iekf_update(system,
     res = data - pred
     res = np.hstack((res,
                      -reg.dot(eta)))
-    status,message = conv.check(res)
+    status,message = conv.check(res,set_residual=True)
     if status == 0:
       logger.info(message)
 
     else:
       logger.debug(message)
-
-    conv.set(res)
 
   Ceta = (np.eye(len(eta)) - K.dot(H)).dot(Cprior)
   return eta,Ceta

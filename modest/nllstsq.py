@@ -394,8 +394,6 @@ def nonlin_lstsq(*args,**kwargs):
       prior covariance matrix.  This can any square array (sparse or
       dense) as long as it has the 'dot' method (default: np.eye(M))
 
-
-
     regularization: regularization matrix scaled by the penalty
       parameter.  This is a (*,M) array.
 
@@ -507,9 +505,6 @@ def nonlin_lstsq(*args,**kwargs):
                                p['lm_matrix'],
                                p['data_indices'])
 
-  final = np.zeros(len(res_func(p['m_k'])))
-
-  #conv = Converger(final,atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'])
   conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'])
 
   J = res_jac(p['m_k'])
@@ -525,6 +520,7 @@ def nonlin_lstsq(*args,**kwargs):
                                   'initial guess for the model parameters')
 
   status,message = conv.check(d)
+  conv.set(d)
   if status == 0:
     logger.info('initial guess ' + message)
 
@@ -598,7 +594,7 @@ def nonlin_lstsq(*args,**kwargs):
       output += obs_jac.dot(soln_cov).dot(obs_jac.transpose()),
 
     if s == 'misfit':
-      output += conv.L2,
+      output += conv.error,
 
     if s == 'iterations':
       output += conv.itr,
