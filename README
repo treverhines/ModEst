@@ -2,7 +2,7 @@ ModEst - Model estimation package for inverse problems
 
 The flagship function for this package is modest.nllstsq.nonlin_lstsq,
 which is a nonlinear least-squares solver.  It performs the same
-operations as scipy.optimize.curve_fit and includes a great of
+operations as scipy.optimize.curve_fit and includes a great deal of
 regularization options.  See the documentation for nonlin_lstsq for
 more information
 
@@ -10,4 +10,10 @@ This package also includes a package for generating a Tikhonov
 regularization matrix based on connectivity of model parameters and it
 includes a Kalman filtering class.  There is currently little
 documentation for these features.
- 
+
+Install ModEst with the shell command "python setup.py install"
+
+Note, there seems to be a bug with bounded_lstsq, which means that you
+may not get the correct solution when trying to put arbitrary bounds
+on the model parameters for when using nonlin_lstsq.  nnls still works
+and forces model parameters to be nonnegative.

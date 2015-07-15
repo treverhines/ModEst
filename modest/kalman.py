@@ -21,18 +21,12 @@ def iekf_update(system,
                 system_kwargs=None,
                 jacobian_args=None,
                 jacobian_kwargs=None,
-                regularization=None,
                 rtol=1e-6,
                 atol=1e-6,
                 maxitr=10):
   '''
-  Update function for Iterated Extended Kalman Filter
-
-  This algorithm comes from [1] and also allows for regularization by
-  appropriately augmenting the observation function, observation
-  Jacobian, and data.
- 
-
+  Update function for Iterated Extended Kalman Filter.  This
+  algorithm comes from [1].
 
   References
   ----------
@@ -53,29 +47,32 @@ def iekf_update(system,
   if jacobian_kwargs is None:
     jacobian_kwargs = {}
 
-  if regularization is None:
-    regularization = np.zeros((0,len(prior)))
-
-  eta = np.copy(prior)
-  reg = np.asarray(regularization)
-  prior = np.asarray(prior)
   data = np.asarray(data)
-  Cdata = scipy.linalg.block_diag(Cdata,
-                                  np.eye(len(reg)))
+  Cdata = np.asarray(Cdata)
+  prior = np.asarray(prior)
+  Cprior = np.asarray(Cprior)
+  eta = np.copy(prior)
+  
+  H = jacobian(eta,
+               *jacobian_args,
+               **jacobian_kwargs)
+
+  K = Cprior.dot(H.transpose()).dot(
+        np.linalg.inv(
+        H.dot(Cprior).dot(H.transpose()) + Cdata))
+
+  pred = system(eta,
+                *system_args,
+                **system_kwargs)
+
+  res = data - pred
 
   def norm(r):
     return r.dot(Cdata).dot(r)     
 
   conv = Converger(atol,rtol,maxitr,norm=norm)
-
-  pred = system(eta,
-                *system_args,
-                **system_kwargs)
-  res = data - pred
-  res = np.hstack((res,
-                   -reg.dot(eta)))
-
   status,message = conv.check(res,set_residual=True)
+
   if status == 0:
     logger.info('initial guess ' + message)
 
@@ -83,21 +80,11 @@ def iekf_update(system,
     logger.debug('initial guess ' + message)
 
   while not ((status == 0) | (status == 3)):
-    H = jacobian(eta,
-                 *jacobian_args,
-                 **jacobian_kwargs)
-    H = np.vstack((H,reg))
-    K = Cprior.dot(H.transpose()).dot(
-          np.linalg.inv(
-            H.dot(Cprior).dot(H.transpose()) + Cdata))
-
     eta = prior + K.dot(res - H.dot(prior - eta))
     pred = system(eta,
                   *system_args,
                   **system_kwargs)
     res = data - pred
-    res = np.hstack((res,
-                     -reg.dot(eta)))
     status,message = conv.check(res,set_residual=True)
     if status == 0:
       logger.info(message)
@@ -105,13 +92,200 @@ def iekf_update(system,
     else:
       logger.debug(message)
 
+    H = jacobian(eta,
+                 *jacobian_args,
+                 **jacobian_kwargs)
+
+    K = Cprior.dot(H.transpose()).dot(
+          np.linalg.inv(
+            H.dot(Cprior).dot(H.transpose()) + Cdata))
+
+
   Ceta = (np.eye(len(eta)) - K.dot(H)).dot(Cprior)
   return eta,Ceta
 
+@funtime
+def numerical_pcov(transition_jacobian,
+                state,
+                T,
+                R,
+                Nt=5,
+                jac_args=None,
+                jac_kwargs=None):
+  # Numerically compute how the stochastic variables influence the
+  # covariance of the other state variable through the transition
+  # process
+  if jac_args is None:
+    jac_args = ()
+  if jac_kwargs is None:
+    jac_kwargs = {}
+
+  t = np.linspace(0,T,Nt)
+  dt = (T)/(Nt-1)
+  J0 = transition_jacobian(state,t[0],*jac_args,**jac_kwargs)
+  out = J0.dot(R).dot(J0.transpose())*dt/2.0
+  for ti in t[1:-1]:
+    Ji = transition_jacobian(state,ti,*jac_args,**jac_kwargs)
+    out += Ji.dot(R).dot(Ji.transpose())*dt
+
+  Jend = transition_jacobian(state,t[-1],*jac_args,**jac_kwargs)
+  out += Jend.dot(R).dot(Jend.transpose())*dt/2.0
+  return out
+
 class KalmanFilter2:
-  def __init__(prior_mean,prior_covariance,transition,observation,time=None)
-  def set_transition_arguments(self,args,kwargs):
-  def set_update_arguments(self,args,kwargs):
+  def __init__(self,
+               prior,
+               prior_covariance,
+               transition,
+               observation,
+               state_rate_covariance=None,
+               transition_jacobian=None,
+               observation_jacobian=None,
+               process_covariance=None):
+    '''
+    new_state = transition(state,dT,*args,**kwargs)       
+    data = observation(state,T,*args,**kwargs)       
+    cov = process_covariance(state,dT,*args,**kwargs)
+
+    '''
+    self.N = len(prior)
+    self.state = {'prior':prior,
+                  'prior_covariance':prior_covariance,
+                  'posterior':None,
+                  'posterior_covariance':None}
+
+    if state_rate_covariance is None:
+      self.R = np.zeros(self.N)
+    else:
+      self.R = state_rate_covariance
+
+    if transition_jacobian is None:
+      def _tjac(state,T,*args,**kwargs):
+        return jacobian_fd(state,
+                           transition,
+                           system_args=(T,)+args,
+                           system_kwargs=kwargs)
+      self.tjac = _tjac
+
+    else:
+      self.tjac = transition_jacobian
+
+    if observation_jacobian is None:
+      def _ojac(state,t,*args,**kwargs):
+        return jacobian_fd(state,
+                           observation,
+                           system_args=(t,)+args,
+                           system_kwargs=kwargs)
+
+      self.ojac = _ojac
+
+    if process_covariance is None:
+      def _pcov(state,T,*args,**kwargs):
+        return numerical_pcov(self.tjac,
+                                  state,T,
+                                  self.R,
+                                  jac_args=args,
+                                  jac_kwargs=kwargs)
+      self.pcov = _pcov
+
+    else:
+      self.pcov = process_covariance
+      
+    self.trans = transition
+    self.obs = observation
+
+  def flush(self,f):
+    pass  
+
+  @funtime
+  def update(self,z,cov,t,
+             obs_args=None,
+             obs_kwargs=None,
+             ojac_args=None,
+             ojac_kwargs=None,
+             solver_kwargs=None):
+
+    if obs_args is None:
+      obs_args = ()
+
+    if obs_kwargs is None:
+      obs_kwargs = {}
+
+    if solver_kwargs is None:
+      solver_kwargs = {}
+
+    if ojac_args is None:
+      ojac_args = ()
+
+    if ojac_kwargs is None:
+      ojac_kwargs = {}
+
+    out = iekf_update(self.obs,
+                self.ojac,
+                z,
+                self.state['prior'],
+                cov,
+                self.state['prior_covariance'],
+                system_args=(t,)+obs_args,
+                system_kwargs=obs_kwargs,
+                jacobian_args=(t,)+ojac_args,
+                jacobian_kwargs=ojac_kwargs,
+                **solver_kwargs)
+
+    self.state['posterior'] = out[0]
+    self.state['posterior_covariance'] = out[1]
+
+  def predict(self,
+              T,
+              trans_args=None,
+              trans_kwargs=None,
+              tjac_args=None,
+              tjac_kwargs=None,
+              pcov_args=None,
+              pcov_kwargs=None):
+ 
+    if trans_args is None:
+      trans_args = ()
+
+    if trans_kwargs is None:
+      trans_kwargs = {}
+
+    if tjac_args is None:
+      tjac_args = ()
+
+    if tjac_kwargs is None:
+      tjac_kwargs = {}
+
+    if pcov_args is None:
+      pcov_args = ()
+
+    if pcov_kwargs is None:
+      pcov_kwargs = {}
+     
+    F = self.tjac(self.state['posterior'],
+                  T,
+                  *tjac_args,
+                  **tjac_kwargs)
+
+    Q = self.pcov(self.state['posterior'],
+                  T,
+                  *pcov_args,
+                  **pcov_kwargs)
+
+    self.state['prior'] = self.trans(self.state['posterior'],
+                                     T,
+                                     *trans_args,
+                                     **trans_kwargs)
+
+    self.state['prior_covariance'] = F.dot(
+                                     self.state['posterior_covariance']).dot(
+                                     F.transpose()) + Q
+
+  def next(self):
+    self.update
+    self.predict
+    self.flush
+
 
 class KalmanFilter:
   def __init__(self,prior,prior_cov,

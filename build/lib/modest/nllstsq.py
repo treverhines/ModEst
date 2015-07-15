@@ -520,7 +520,7 @@ def nonlin_lstsq(*args,**kwargs):
                                   'initial guess for the model parameters')
 
   status,message = conv.check(d)
-  conv.set(d)
+  conv.set_residual(d)
   if status == 0:
     logger.info('initial guess ' + message)
 
@@ -563,7 +563,7 @@ def nonlin_lstsq(*args,**kwargs):
         logger.debug(message)
   
     p['m_k'] = m_new
-    conv.set(d_new)
+    conv.set_residual(d_new)
 
     J = res_jac(p['m_k'])
     J = np.asarray(J,dtype=p['dtype'])
