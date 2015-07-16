@@ -6,6 +6,7 @@ from nllstsq import nonlin_lstsq
 from converger import Converger
 import logging
 from timing import funtime
+import h5py
 import scipy.linalg
 
 logger = logging.getLogger(__name__)
@@ -179,11 +180,32 @@ class KalmanFilter:
                prior,
                prior_cov,
                obs,
+               obs_args=None,
+               obs_kwargs=None,
                trans=None,
+               trans_args=None,
+               trans_kwargs=None,
                tjac=None,
+               tjac_args=None,
+               tjac_kwargs=None,
                pcov=None,
+               pcov_args=None,
+               pcov_kwargs=None,
                ojac=None,  
-               state_rate_cov=None):
+               ojac_args=None,
+               ojac_kwargs=None,
+               solver_kwargs=None, 
+               state_rate_cov=None,
+               history=None):
+    '''
+    data = obs(state,t,*obs_args,**obs_kwargs)
+    obs_jacobian = ojac(state,t,*ojac_args,**ojac_kwargs)
+    
+    new_state = trans(state,dt,*tjac_args,**tjac_kwargs)
+    trans_jacobian = tjac(state,dt,*tjac_args,**tjac_kwargs)
+
+    process_cov = pcov(state,dt,stat_rate_cov,*pcov_args,**pcov_kwargs) 
+    '''
     self.N = len(prior)
     self.state = {'prior':prior,
                   'prior_covariance':prior_cov,
@@ -198,27 +220,24 @@ class KalmanFilter:
 
     if tjac is None:
       tjac = make_default_tjac(trans)
+      if tjac_args is None:
+        tjac_args = trans_args
+      if tjac_kwargs is None:
+        tjac_kwargs = trans_kwargs
 
     if pcov is None:
       pcov = make_default_pcov(tjac)
+      if pcov_args is None:
+        pcov_args = tjac_args
+      if pcov_kwargs is None:
+        pcov_kwargs = pcov_kwargs
 
     if ojac is None:
       ojac = make_default_ojac(obs)
-
-    self.obs = obs
-    self.trans = trans
-    self.tjac = tjac
-    self.pcov = pcov
-    self.ojac = ojac
-    self.R = state_rate_cov
-    
-  @funtime
-  def update(self,z,cov,t,
-             obs_args=None,
-             obs_kwargs=None,
-             ojac_args=None,
-             ojac_kwargs=None,
-             solver_kwargs=None):
+      if ojac_args is None:
+        ojac_args = obs_args
+      if ojac_kwargs is None:
+        ojac_kwargs = obs_kwargs
 
     if obs_args is None:
       obs_args = ()
@@ -235,27 +254,6 @@ class KalmanFilter:
     if ojac_kwargs is None:
       ojac_kwargs = {}
 
-    out = iekf_update(self.obs,self.ojac,z,
-                      self.state['prior'],cov,
-                      self.state['prior_covariance'],
-                      system_args=(t,)+obs_args,
-                      system_kwargs=obs_kwargs,
-                      jacobian_args=(t,)+ojac_args,
-                      jacobian_kwargs=ojac_kwargs,
-                      **solver_kwargs)
-
-    self.state['posterior'] = out[0]
-    self.state['posterior_covariance'] = out[1]
-
-  @funtime
-  def predict(self,dt,
-              trans_args=None,
-              trans_kwargs=None,
-              tjac_args=None,
-              tjac_kwargs=None,
-              pcov_args=None,
-              pcov_kwargs=None):
- 
     if trans_args is None:
       trans_args = ()
 
@@ -274,63 +272,91 @@ class KalmanFilter:
     if pcov_kwargs is None:
       pcov_kwargs = {}
      
+    self.obs = obs
+    self.trans = trans
+    self.tjac = tjac
+    self.pcov = pcov
+    self.ojac = ojac
+    self.R = state_rate_cov
+    self.obs_args = obs_args
+    self.obs_kwargs = obs_kwargs
+    self.solver_kwargs = solver_kwargs
+    self.ojac_args = ojac_args
+    self.ojac_kwargs = ojac_kwargs
+    self.trans_args = trans_args
+    self.trans_kwargs = trans_kwargs
+    self.tjac_args = tjac_args
+    self.tjac_kwargs = tjac_kwargs
+    self.pcov_args = pcov_args
+    self.pcov_kwargs = pcov_kwargs
+    self.history = history
+    self.itr = 0
+
+  @funtime
+  def update(self,z,cov,t):
+    out = iekf_update(self.obs,self.ojac,z,
+                      self.state['prior'],cov,
+                      self.state['prior_covariance'],
+                      system_args=(t,)+self.obs_args,
+                      system_kwargs=self.obs_kwargs,
+                      jacobian_args=(t,)+self.ojac_args,
+                      jacobian_kwargs=self.ojac_kwargs,
+                      **self.solver_kwargs)
+
+    self.state['posterior'] = out[0]
+    self.state['posterior_covariance'] = out[1]
+    if self.history is not None:
+      self.history[self.itr,:] = out[0]
+
+
+
+  @funtime
+  def predict(self,dt):
     F = self.tjac(self.state['posterior'],
                   dt,
-                  *tjac_args,
-                  **tjac_kwargs)
+                  *self.tjac_args,
+                  **self.tjac_kwargs)
 
     Q = self.pcov(self.state['posterior'],
                   dt,self.R,
-                  *pcov_args,
-                  **pcov_kwargs)
+                  *self.pcov_args,
+                  **self.pcov_kwargs)
 
     self.state['prior'] = self.trans(self.state['posterior'],
                                      dt,
-                                     *trans_args,
-                                     **trans_kwargs)
+                                     *self.trans_args,
+                                     **self.trans_kwargs)
 
     self.state['prior_covariance'] = F.dot(
                                      self.state['posterior_covariance']).dot(
                                      F.transpose()) + Q
+    self.itr += 1
 
+  def next(self,data,data_cov,t,dt):
+    self.update(data,data_cov,t)
+    self.predict(dt)
 
-
-  def next(self,data,data_cov,t,dt,
-           obs_args=None,
-           obs_kwargs=None,
-           ojac_args=None,
-           ojac_kwargs=None,
-           solver_kwargs=None,
-           trans_args=None,
-           trans_kwargs=None,
-           tjac_args=None,
-           tjac_kwargs=None,
-           pcov_args=None,
-           pcov_kwargs=None):
-
-    self.update(data,data_cov,t,
-                obs_args=obs_args,
-                obs_kwargs=obs_kwargs,
-                ojac_args=ojac_args,
-                ojac_kwargs=ojac_kwargs,
-                solver_kwargs=solver_kwargs)
-
-    self.predict(dt,
-                 trans_args=trans_args,
-                 trans_kwargs=trans_kwargs,
-                 tjac_args=tjac_args,
-                 tjac_kwargs=tjac_kwargs,
-                 pcov_args=pcov_args,
-                 pcov_kwargs=pcov_kwargs)
-
+  def get_transition_jacobian(self):
+    return self.tjac(self.state['posterior'],
+                     dt,
+                     *self.tjac_args,
+                     **self.tjac_kwargs)
 
   def get_prior(self):
     return self.state['prior'],self.state['prior_covariance']
 
   def get_posterior(self):
-    return self.state['posterior'],self.state['prior_posterior']
+    return self.state['posterior'],self.state['posterior_covariance']
 
-  
+  def filter(self,data,data_covariance,time):
+    dtime = np.concatenate((np.diff(time),[0]))
+    for i,d,dc,t,dt in zip(range(len(time)),data,data_covariance,time,dtime):
+      self.next(d,dc,t,dt)
+      m,c = self.get_posterior()
+      if self.history is not None: 
+        self.history[i,:] = m
+       
+        
 
 class _KalmanFilter:
   def __init__(self,prior,prior_cov,
@@ -408,7 +434,6 @@ class _KalmanFilter:
                 'smooth_covariance':None,
                 'transition':None}
     self.state = []
-
 
   def _add_state(self):
     self.state += [self.new]
