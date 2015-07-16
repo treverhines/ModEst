@@ -20,6 +20,21 @@ class Converger:
     3: An invalid value (nan or inf) has been found in the residual 
       being checked
 
+  Attributes
+  ----------
+    atol: 0 is raised when absolution error is below this value
+
+    rtol: 0 is raised when relative error is below this value
+ 
+    maxitr: total number of calls to to 'set_residual' (which should
+      be the number of steps in model space) before 0 is
+      raised. maxitr=0 will raise a convergence flag on the first
+      call, maxitr=1 will raise it on the second call, etc.
+
+    norm: callable which takes residual and returns a scalar
+
+    error: norm(residual)
+
   '''
   def __init__(self,atol=1e-6,rtol=1e-6,maxitr=100,
                norm=np.linalg.norm):
@@ -43,19 +58,19 @@ class Converger:
       out = 3,message
 
     elif error_new <= self.atol:
-      message = 'converged due to atol:          error=%s' % error_new
+      message = 'converged due to atol:          error=%s, itr=%s' % (error_new,self.itr)
       out = 0,message
 
     elif abs(error_new - self.error) <= self.rtol:
-      message = 'converged due to rtol:          error=%s' % error_new
+      message = 'converged due to rtol:          error=%s, itr=%s' % (error_new,self.itr)
       out = 0,message   
 
     elif error_new < self.error:
-      message = 'converging:                     error=%s' % error_new
+      message = 'converging:                     error=%s, itr=%s' % (error_new,self.itr)
       out = 1,message   
 
     elif error_new >= self.error:
-      message = 'diverging:                      error=%s' % error_new
+      message = 'diverging:                      error=%s, itr=%s' % (error_new,self.itr)
       out =  2,message   
 
     if set_residual == True:
