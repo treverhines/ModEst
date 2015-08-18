@@ -48,24 +48,33 @@ def iekf_update(system,
   if jacobian_kwargs is None:
     jacobian_kwargs = {}
 
-  data = np.asarray(data)
-  Cdata = np.asarray(Cdata)
+  if np.ma.isMA(data):
+    mask = data.mask  
+    data = data.data              
+
+  else:
+    mask = np.zeros(len(data),dtype=bool)
+
+  data = np.asarray(data[~mask])
+  Cdata = np.asarray(Cdata[np.ix_(~mask,~mask)])
   prior = np.asarray(prior)
   Cprior = np.asarray(Cprior)
   eta = np.copy(prior)
   
   H = jacobian(eta,*jacobian_args,**jacobian_kwargs)
+  H = H[~mask,:]
 
   K = Cprior.dot(H.transpose()).dot(
         np.linalg.inv(
         H.dot(Cprior).dot(H.transpose()) + Cdata))
 
   pred = system(eta,*system_args,**system_kwargs)
+  pred = pred[~mask]
 
   res = data - pred
 
   def norm(r):
-    return r.dot(Cdata).dot(r)     
+    return r.dot(np.linalg.inv(Cdata)).dot(r)     
 
   conv = Converger(atol,rtol,maxitr,norm=norm)
   status,message = conv.check(res,set_residual=True)
@@ -74,13 +83,16 @@ def iekf_update(system,
   while not ((status == 0) | (status == 3)):
     eta = prior + K.dot(res - H.dot(prior - eta))
     pred = system(eta,*system_args,**system_kwargs)
+    pred = pred[~mask]
     res = data - pred
+    
     status,message = conv.check(res,set_residual=True)
     logger.debug(message)
 
     H = jacobian(eta,
                  *jacobian_args,
                  **jacobian_kwargs)
+    H = H[~mask,:]
 
     K = Cprior.dot(H.transpose()).dot(
           np.linalg.inv(
@@ -126,9 +138,9 @@ def pcov_numerical(tjac,state,dt,R,N=5,
 
 def default_trans(state,dt):
   '''
-  Defaut transition function, which simply returns to state variable
+  Defaut transition function, which simply returns the state variable
   '''
-  return state
+  return np.array(state,copy=True)
 
 
 def make_default_tjac(trans):
@@ -145,7 +157,7 @@ def make_default_tjac(trans):
   return default_tjac
 
 
-def make_default_pcov(tjac):
+def make_default_pcov(tjac,state_rate_cov):
   '''
   Creates the default process covariance function
 
@@ -153,7 +165,7 @@ def make_default_pcov(tjac):
   describing how uncertainty in stochastic state parameters propagates
   to the next time step through the transition function
   '''
-  def default_pcov(state,dt,state_rate_cov,*args,**kwargs):
+  def default_pcov(state,dt,*args,**kwargs):
     return pcov_numerical(tjac,state,dt,
                           state_rate_cov,
                           tjac_args=args,
@@ -226,7 +238,7 @@ class KalmanFilter:
         tjac_kwargs = trans_kwargs
 
     if pcov is None:
-      pcov = make_default_pcov(tjac)
+      pcov = make_default_pcov(tjac,state_rate_cov)
       if pcov_args is None:
         pcov_args = tjac_args
       if pcov_kwargs is None:
@@ -277,7 +289,6 @@ class KalmanFilter:
     self.tjac = tjac
     self.pcov = pcov
     self.ojac = ojac
-    self.R = state_rate_cov
     self.obs_args = obs_args
     self.obs_kwargs = obs_kwargs
     self.solver_kwargs = solver_kwargs
@@ -318,7 +329,7 @@ class KalmanFilter:
                   **self.tjac_kwargs)
 
     Q = self.pcov(self.state['posterior'],
-                  dt,self.R,
+                  dt,
                   *self.pcov_args,
                   **self.pcov_kwargs)
 
