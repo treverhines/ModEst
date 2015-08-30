@@ -188,7 +188,7 @@ def make_default_ojac(obs):
   return default_ojac
 
  
-def check_history_size(history,itr,chunk_size):
+def adjust_history_size(history,itr,chunk_size):
     pad_length = 1
     for k in history.keys():
       s = history[k].shape[0]
@@ -223,7 +223,7 @@ class KalmanFilter:
                solver_kwargs=None, 
                state_rate_cov=None,
                history_file=None,
-               chunk_size=100):
+               chunk_size=1):
     '''
     data = obs(state,t,*obs_args,**obs_kwargs)
     obs_jacobian = ojac(state,t,*ojac_args,**ojac_kwargs)
@@ -233,6 +233,7 @@ class KalmanFilter:
 
     process_cov = pcov(state,dt,stat_rate_cov,*pcov_args,**pcov_kwargs) 
     '''
+    print('RUNNING FROM MODEST')
     self.N = len(prior)
     self.chunk_size = chunk_size
 
@@ -377,7 +378,7 @@ class KalmanFilter:
     self.state['posterior'] = out[0]
     self.state['posterior_covariance'] = out[1]
 
-    check_history_size(self.history,self.itr,self.chunk_size)
+    adjust_history_size(self.history,self.itr,self.chunk_size)
     self.history['posterior'][self.itr,:] = self.state['posterior']
     self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
 
@@ -406,7 +407,7 @@ class KalmanFilter:
                                      self.state['posterior_covariance']).dot(
                                      F.transpose()) + Q
 
-    check_history_size(self.history,self.itr,self.chunk_size)
+    adjust_history_size(self.history,self.itr,self.chunk_size)
     self.history['prior'][self.itr,:] = self.state['prior']
     self.history['posterior_covariance'][self.itr,:,:] = self.state['prior_covariance']
     self.history['transition_jacobian'][self.itr,:,:] = F
