@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import modest
 import scipy.linalg
 import unittest
+import logging
+logging.basicConfig(level=logging.WARNING)
 
 # Kalman filter test script
 #
@@ -58,20 +60,22 @@ reg_mat = np.array([[-1,1],[1,-1]])
 
 class Test(unittest.TestCase):
   def test_bayes_least_squares(self):
-    soln1 = modest.nonlin_lstsq(system,
+    soln1,cov1 = modest.nonlin_lstsq(system,
                                 data,
                                 model_prior,
                                 data_covariance=data_cov,
                                 prior_covariance=model_prior_cov,
-                                system_args=(time,))
+                                system_args=(time,),
+                                output=['solution','solution_uncertainty'])
     
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,
                              system_kf)
 
     kf.filter(data_kf,data_cov_kf,time)
-    soln2 = kf.get_posterior()[0]
+    soln2,cov2 = kf.get_posterior()
     self.assertTrue(np.all(np.isclose(soln1,soln2)))
+    self.assertTrue(np.all(np.isclose(cov1,cov2)))
 
   def test_reg_bayes_least_squares(self):
     soln1 = modest.nonlin_lstsq(system,
@@ -91,38 +95,60 @@ class Test(unittest.TestCase):
 
   def test_masked_arrays(self):
     data_indices = [1,2,3,5,6,7,8,10,12]
-    mask = np.ones(len(data),dtype=bool)
-    mask[data_indices] = 0
-    masked_data = np.ma.masked_array(data,mask=mask)
-    masked_data = masked_data[:,None]
-    soln1 = modest.nonlin_lstsq(system,
+    mask = np.ones((len(data),1),dtype=bool)
+    mask[data_indices,:] = False
+    soln1,cov1 = modest.nonlin_lstsq(system,
                                 data,
                                 model_prior,
                                 data_covariance=data_cov,
                                 prior_covariance=model_prior_cov,
                                 data_indices=data_indices, 
-                                system_args=(time,))
+                                system_args=(time,),
+                                output=['solution','solution_uncertainty'])
 
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,
                              system_kf)
 
-    kf.filter(masked_data,data_cov_kf,time)
-    soln2 = kf.get_posterior()[0]
+    kf.filter(data_kf,data_cov_kf,time,mask=mask)
+    soln2,cov2 = kf.get_posterior()
     self.assertTrue(np.all(np.isclose(soln1,soln2)))
+    self.assertTrue(np.all(np.isclose(cov1,cov2)))
 
-  def test_history(self):
+  def test_smoothing_no_swap(self):
+    pred1 = modest.nonlin_lstsq(system,
+                                data,
+                                model_prior,
+                                data_covariance=data_cov,
+                                prior_covariance=model_prior_cov,
+                                system_args=(time,),
+                                output=['predicted'])
+
+    kf = modest.KalmanFilter(model_prior,
+                             model_prior_cov,
+                             system_kf)
+ 
+    kf.filter(data_kf,data_cov_kf,time,smooth=True)
+    pred2 = np.array([system_kf(kf.history['smooth'][i,:],t) for i,t in enumerate(time)])
+    self.assertTrue(np.all(np.isclose(pred1[:,None],pred2)))
+
+  def test_smoothing_swap(self):
+    pred1 = modest.nonlin_lstsq(system,
+                                data,
+                                model_prior,
+                                data_covariance=data_cov,
+                                prior_covariance=model_prior_cov,
+                                system_args=(time,),
+                                output=['predicted'])
+
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,
                              system_kf,
                              history_file='temp.h5')
-    kf.filter(data_kf,data_cov_kf,time)
-    print(kf.history)
-    kf = modest.KalmanFilter(model_prior,
-                             model_prior_cov,
-                             system_kf)
-    kf.filter(data_kf,data_cov_kf,time)
-    print(kf.history)
-    self.assertTrue(True)
+ 
+    kf.filter(data_kf,data_cov_kf,time,smooth=True)
+    pred2 = np.array([system_kf(kf.history['smooth'][i,:],t) for i,t in enumerate(time)])
+    self.assertTrue(np.all(np.isclose(pred1[:,None],pred2)))
+
 
 unittest.main()
