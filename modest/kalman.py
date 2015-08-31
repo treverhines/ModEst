@@ -6,6 +6,7 @@ from nllstsq import nonlin_lstsq
 from converger import Converger
 import logging
 from timing import funtime
+import timing
 import h5py
 import scipy.linalg
 
@@ -24,7 +25,8 @@ def iekf_update(system,
                 jacobian_kwargs=None,
                 rtol=1e-6,
                 atol=1e-6,
-                maxitr=10):
+                maxitr=10,
+                mask=None):
   '''
   Update function for Iterated Extended Kalman Filter.  This
   algorithm comes from [1].
@@ -48,58 +50,54 @@ def iekf_update(system,
   if jacobian_kwargs is None:
     jacobian_kwargs = {}
 
-  if np.ma.isMA(data):
-    mask = data.mask  
-    data = data.data              
-
-  else:
+  if mask is None:
     mask = np.zeros(len(data),dtype=bool)
 
-  data = np.asarray(data[~mask])
-  Cdata = np.asarray(Cdata[np.ix_(~mask,~mask)])
+  data_m = np.asarray(data[~mask])
+  Cdata_m = np.asarray(Cdata[np.ix_(~mask,~mask)])
   prior = np.asarray(prior)
   Cprior = np.asarray(Cprior)
   eta = np.copy(prior)
   
   H = jacobian(eta,*jacobian_args,**jacobian_kwargs)
-  H = H[~mask,:]
+  H_m = H[~mask,:]
 
-  K = Cprior.dot(H.transpose()).dot(
+  K = Cprior.dot(H_m.transpose()).dot(
         np.linalg.inv(
-        H.dot(Cprior).dot(H.transpose()) + Cdata))
+          H_m.dot(Cprior).dot(H_m.transpose()) + Cdata_m))
 
   pred = system(eta,*system_args,**system_kwargs)
-  pred = pred[~mask]
+  pred_m = pred[~mask]
 
-  res = data - pred
+  res_m = data_m - pred_m
 
   def norm(r):
-    return r.dot(np.linalg.inv(Cdata)).dot(r)     
+    return r.dot(np.linalg.inv(Cdata_m)).dot(r)     
 
   conv = Converger(atol,rtol,maxitr,norm=norm)
-  status,message = conv.check(res,set_residual=True)
+  status,message = conv.check(res_m,set_residual=True)
   logger.debug('initial guess ' + message)
 
   while not ((status == 0) | (status == 3)):
-    eta = prior + K.dot(res - H.dot(prior - eta))
+    eta = prior + K.dot(res_m - H_m.dot(prior - eta))
     pred = system(eta,*system_args,**system_kwargs)
-    pred = pred[~mask]
-    res = data - pred
+    pred_m = pred[~mask]
+    res_m = data_m - pred_m
     
-    status,message = conv.check(res,set_residual=True)
+    status,message = conv.check(res_m,set_residual=True)
     logger.debug(message)
 
     H = jacobian(eta,
                  *jacobian_args,
                  **jacobian_kwargs)
-    H = H[~mask,:]
+    H_m = H[~mask,:]
 
-    K = Cprior.dot(H.transpose()).dot(
+    K = Cprior.dot(H_m.transpose()).dot(
           np.linalg.inv(
-            H.dot(Cprior).dot(H.transpose()) + Cdata))
+            H_m.dot(Cprior).dot(H_m.transpose()) + Cdata_m))
 
 
-  Ceta = (np.eye(len(eta)) - K.dot(H)).dot(Cprior)
+  Ceta = (np.eye(len(eta)) - K.dot(H_m)).dot(Cprior)
   return eta,Ceta
 
 @funtime
@@ -186,7 +184,21 @@ def make_default_ojac(obs):
                        system_kwargs=kwargs)
   return default_ojac
 
- 
+
+@funtime  
+def adjust_history_size(history,itr):
+    pad_length = 1
+    for k in history.keys():
+      s = history[k].shape[0]
+      if s <= itr:
+        if type(history) is h5py.File:
+          history[k].resize(itr+pad_length,0)
+        else:
+          pad_shape = list(history[k].shape)
+          pad_shape[0] = (itr - s) + pad_length
+          pad = np.zeros(pad_shape)
+          history[k] = np.concatenate((history[k],pad),0)
+
 class KalmanFilter:
   def __init__(self,
                prior,
@@ -208,7 +220,8 @@ class KalmanFilter:
                ojac_kwargs=None,
                solver_kwargs=None, 
                state_rate_cov=None,
-               history=None):
+               history_file=None,
+               light=False):
     '''
     data = obs(state,t,*obs_args,**obs_kwargs)
     obs_jacobian = ojac(state,t,*ojac_args,**ojac_kwargs)
@@ -222,7 +235,9 @@ class KalmanFilter:
     self.state = {'prior':prior,
                   'prior_covariance':prior_cov,
                   'posterior':None,
-                  'posterior_covariance':None}
+                  'posterior_covariance':None,
+                  'smooth':None,
+                  'smooth_covariance':None}
 
     if state_rate_cov is None:
       state_rate_cov = np.zeros((self.N,self.N))
@@ -250,6 +265,57 @@ class KalmanFilter:
         ojac_args = obs_args
       if ojac_kwargs is None:
         ojac_kwargs = obs_kwargs
+
+    if (history_file is None) & (light == False):
+      # history is stored in RAM, which could potentially use many GB
+      history = {'prior':np.zeros((0,self.N)),
+                 'posterior':np.zeros((0,self.N)),
+                 'smooth':np.zeros((0,self.N)),
+                 'prior_covariance':np.zeros((0,self.N,self.N)),
+                 'posterior_covariance':np.zeros((0,self.N,self.N)),
+                 'smooth_covariance':np.zeros((0,self.N,self.N)),
+                 'transition_jacobian':np.zeros((0,self.N,self.N))}
+
+    elif (history_file is not None) & (light == False):
+      history = h5py.File(history_file,'w')
+      history.create_dataset('prior',
+                             shape=(0,self.N),
+                             maxshape=(None,self.N),
+                             dtype=np.float64,
+                             chunks=True)
+
+      history.create_dataset('posterior',
+                             shape=(0,self.N),
+                             maxshape=(None,self.N),
+                             dtype=np.float64,
+                             chunks=True)
+
+      history.create_dataset('smooth',
+                             shape=(0,self.N),
+                             maxshape=(None,self.N),
+                             dtype=np.float64,
+                             chunks=True)
+      history.create_dataset('prior_covariance',
+                             shape=(0,self.N,self.N),
+                             maxshape=(None,self.N,self.N),
+                             dtype=np.float64,
+                             chunks=True)
+      history.create_dataset('posterior_covariance',
+                             shape=(0,self.N,self.N),
+                             maxshape=(None,self.N,self.N),
+                             chunks=True)
+      history.create_dataset('smooth_covariance',
+                             shape=(0,self.N,self.N),
+                             maxshape=(None,self.N,self.N),
+                             dtype=np.float64,
+                             chunks=True)
+      history.create_dataset('transition_jacobian',
+                             shape=(0,self.N,self.N),
+                             maxshape=(None,self.N,self.N),
+                             dtype=np.float64,
+                             chunks=True)
+    else:
+      history = None
 
     if obs_args is None:
       obs_args = ()
@@ -302,9 +368,12 @@ class KalmanFilter:
     self.pcov_kwargs = pcov_kwargs
     self.history = history
     self.itr = 0
+    self.t = None
+    self.light = light
 
   @funtime
-  def update(self,z,cov,t):
+  def update(self,z,cov,t,mask=None):
+    logging.info('updating prior with observations at time %s (iteration %s)' % (t,self.itr))
     out = iekf_update(self.obs,self.ojac,z,
                       self.state['prior'],cov,
                       self.state['prior_covariance'],
@@ -312,17 +381,27 @@ class KalmanFilter:
                       system_kwargs=self.obs_kwargs,
                       jacobian_args=(t,)+self.ojac_args,
                       jacobian_kwargs=self.ojac_kwargs,
+                      mask=mask,
                       **self.solver_kwargs)
 
     self.state['posterior'] = out[0]
     self.state['posterior_covariance'] = out[1]
-    if self.history is not None:
-      self.history[self.itr,:] = out[0]
 
+    if self.light == False:
+      adjust_history_size(self.history,self.itr)
+      self.history['prior'][self.itr,:] = self.state['prior']
+      self.history['prior_covariance'][self.itr,:,:] = self.state['prior_covariance']
+
+      self.history['posterior'][self.itr,:] = self.state['posterior']
+      self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
+      
+    self.itr += 1
+    self.t = t
 
 
   @funtime
   def predict(self,dt):
+    logging.info('predicting prior for time %s (iteration %s)' % (self.t+dt,self.itr))
     F = self.tjac(self.state['posterior'],
                   dt,
                   *self.tjac_args,
@@ -341,11 +420,16 @@ class KalmanFilter:
     self.state['prior_covariance'] = F.dot(
                                      self.state['posterior_covariance']).dot(
                                      F.transpose()) + Q
-    self.itr += 1
 
-  def next(self,data,data_cov,t,dt):
-    self.update(data,data_cov,t)
-    self.predict(dt)
+    if self.light == False:
+      adjust_history_size(self.history,self.itr)
+      self.history['transition_jacobian'][self.itr,:,:] = F
+
+  def next(self,data,data_cov,t,mask=None):
+    if self.t is not None:
+      self.predict(t - self.t)    
+
+    self.update(data,data_cov,t,mask=mask)
 
   def get_transition_jacobian(self):
     return self.tjac(self.state['posterior'],
@@ -359,15 +443,52 @@ class KalmanFilter:
   def get_posterior(self):
     return self.state['posterior'],self.state['posterior_covariance']
 
-  def filter(self,data,data_covariance,time):
-    dtime = np.concatenate((np.diff(time),[0]))
-    for i,d,dc,t,dt in zip(range(len(time)),data,data_covariance,time,dtime):
-      self.next(d,dc,t,dt)
-      m,c = self.get_posterior()
-      if self.history is not None: 
-        self.history[i,:] = m
-       
-        
+  def get_smooth(self):
+    return self.state['smooth'],self.state['smooth_covariance']
+
+  def filter(self,data,data_covariance,time,mask=None,smooth=False):
+    if mask is None:
+      mask = [None for i in range(len(time))]
+
+    for i,d,dc,t,m in zip(range(len(time)),data,data_covariance,time,mask):
+      self.next(d,dc,t,mask=m)
+
+    if smooth is True:
+      self.smooth()
+      return self.get_smooth()    
+
+    else:
+      return self.get_posterior()    
+
+  @funtime
+  def smooth(self):
+    '''
+    Smoothes the state variables using the Rauch-Tung-Striebel
+    algorithm. This algorithm is intended for linear systems and may
+    produce undesirable results if the forward problem is highly
+    nonlinear
+    '''
+    if self.light == True:
+      logger.warning('Cannot use "smooth" method because light flag was raised '
+                     'upon initializating KalmanFilter object')
+      return
+
+    n = self.itr
+    h = self.history
+    h['smooth'][n-1,:] = h['posterior'][n-1,:] 
+    h['smooth_covariance'][n-1,:,:] = h['posterior_covariance'][n-1,:,:]
+    for k in range(n-1)[::-1]:
+      logging.info('creating smoothed state for iteration %s' % k)
+      Ck = h['posterior_covariance'][k,:,:].dot(
+            h['transition_jacobian'][k+1,:,:].transpose()).dot(
+              np.linalg.inv(h['prior_covariance'][k+1,:,:]))
+      h['smooth'][k,:] = (
+        h['posterior'][k,:] + 
+        Ck.dot(h['smooth'][k+1,:] - h['prior'][k+1,:]))
+      h['smooth_covariance'][k,:,:] = (
+        h['posterior_covariance'][k,:,:] + 
+        Ck.dot(h['smooth_covariance'][k+1,:,:] - 
+               h['prior_covariance'][k+1,:,:]).dot(Ck.transpose()))
 
 class _KalmanFilter:
   def __init__(self,prior,prior_cov,
