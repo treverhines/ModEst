@@ -373,6 +373,7 @@ class KalmanFilter:
 
   @funtime
   def update(self,z,cov,t,mask=None):
+    logging.info('updating prior with observations at time %s (iteration %s)' % (t,self.itr))
     out = iekf_update(self.obs,self.ojac,z,
                       self.state['prior'],cov,
                       self.state['prior_covariance'],
@@ -393,11 +394,14 @@ class KalmanFilter:
 
       self.history['posterior'][self.itr,:] = self.state['posterior']
       self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
-      self.itr += 1
+      
+    self.itr += 1
+    self.t = t
 
 
   @funtime
   def predict(self,dt):
+    logging.info('predicting prior for time %s (iteration %s)' % (self.t+dt,self.itr))
     F = self.tjac(self.state['posterior'],
                   dt,
                   *self.tjac_args,
@@ -426,7 +430,6 @@ class KalmanFilter:
       self.predict(t - self.t)    
 
     self.update(data,data_cov,t,mask=mask)
-    self.t = t
 
   def get_transition_jacobian(self):
     return self.tjac(self.state['posterior'],
@@ -475,6 +478,7 @@ class KalmanFilter:
     h['smooth'][n-1,:] = h['posterior'][n-1,:] 
     h['smooth_covariance'][n-1,:,:] = h['posterior_covariance'][n-1,:,:]
     for k in range(n-1)[::-1]:
+      logging.info('creating smoothed state for iteration %s' % k)
       Ck = h['posterior_covariance'][k,:,:].dot(
             h['transition_jacobian'][k+1,:,:].transpose()).dot(
               np.linalg.inv(h['prior_covariance'][k+1,:,:]))
