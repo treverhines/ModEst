@@ -303,6 +303,7 @@ class KalmanFilter:
       history.create_dataset('posterior_covariance',
                              shape=(0,self.N,self.N),
                              maxshape=(None,self.N,self.N),
+                             dtype=np.float64,
                              chunks=True)
       history.create_dataset('smooth_covariance',
                              shape=(0,self.N,self.N),
