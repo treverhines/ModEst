@@ -74,6 +74,7 @@ class Test(unittest.TestCase):
 
     kf.filter(data_kf,data_cov_kf,time)
     soln2,cov2 = kf.get_posterior()
+    kf.close()
     self.assertTrue(np.all(np.isclose(soln1,soln2)))
     self.assertTrue(np.all(np.isclose(cov1,cov2)))
 
@@ -91,6 +92,7 @@ class Test(unittest.TestCase):
                              obs_args=(0.25819889*reg_mat,))
     kf.filter(data_reg_kf,data_reg_cov_kf,time)
     soln2 = kf.get_posterior()[0]
+    kf.close()
     self.assertTrue(np.all(np.isclose(soln1,soln2)))
 
   def test_masked_arrays(self):
@@ -112,27 +114,11 @@ class Test(unittest.TestCase):
 
     kf.filter(data_kf,data_cov_kf,time,mask=mask)
     soln2,cov2 = kf.get_posterior()
+    kf.close()
     self.assertTrue(np.all(np.isclose(soln1,soln2)))
     self.assertTrue(np.all(np.isclose(cov1,cov2)))
 
-  def test_smoothing_no_swap(self):
-    pred1 = modest.nonlin_lstsq(system,
-                                data,
-                                model_prior,
-                                data_covariance=data_cov,
-                                prior_covariance=model_prior_cov,
-                                system_args=(time,),
-                                output=['predicted'])
-
-    kf = modest.KalmanFilter(model_prior,
-                             model_prior_cov,
-                             system_kf)
- 
-    kf.filter(data_kf,data_cov_kf,time,smooth=True)
-    pred2 = np.array([system_kf(kf.history['smooth'][i,:],t) for i,t in enumerate(time)])
-    self.assertTrue(np.all(np.isclose(pred1[:,None],pred2)))
-
-  def test_smoothing_swap(self):
+  def test_smoothing_core(self):
     pred1 = modest.nonlin_lstsq(system,
                                 data,
                                 model_prior,
@@ -144,10 +130,30 @@ class Test(unittest.TestCase):
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,
                              system_kf,
-                             history_file='temp.h5')
+                             core=True)
  
     kf.filter(data_kf,data_cov_kf,time,smooth=True)
     pred2 = np.array([system_kf(kf.history['smooth'][i,:],t) for i,t in enumerate(time)])
+    kf.close()
+    self.assertTrue(np.all(np.isclose(pred1[:,None],pred2)))
+
+  def test_smoothing_no_core(self):
+    pred1 = modest.nonlin_lstsq(system,
+                                data,
+                                model_prior,
+                                data_covariance=data_cov,
+                                prior_covariance=model_prior_cov,
+                                system_args=(time,),
+                                output=['predicted'])
+
+    kf = modest.KalmanFilter(model_prior,
+                             model_prior_cov,
+                             system_kf,
+                             core=False)
+ 
+    kf.filter(data_kf,data_cov_kf,time,smooth=True)
+    pred2 = np.array([system_kf(kf.history['smooth'][i,:],t) for i,t in enumerate(time)])
+    kf.close()
     self.assertTrue(np.all(np.isclose(pred1[:,None],pred2)))
 
 

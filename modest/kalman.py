@@ -7,6 +7,7 @@ from converger import Converger
 import logging
 from timing import funtime
 import timing
+import os
 import h5py
 import scipy.linalg
 
@@ -186,18 +187,12 @@ def make_default_ojac(obs):
 
 
 @funtime  
-def adjust_history_size(history,itr):
+def adjust_temp_size(history,itr):
     pad_length = 1
     for k in history.keys():
       s = history[k].shape[0]
       if s <= itr:
-        if type(history) is h5py.File:
-          history[k].resize(itr+pad_length,0)
-        else:
-          pad_shape = list(history[k].shape)
-          pad_shape[0] = (itr - s) + pad_length
-          pad = np.zeros(pad_shape)
-          history[k] = np.concatenate((history[k],pad),0)
+        history[k].resize(itr+pad_length,0)
 
 class KalmanFilter:
   def __init__(self,
@@ -220,8 +215,9 @@ class KalmanFilter:
                ojac_kwargs=None,
                solver_kwargs=None, 
                state_rate_cov=None,
-               history_file=None,
-               light=False):
+               temp_file='.temp.h5',
+               core=True,
+               chunk_length=100):
     '''
     data = obs(state,t,*obs_args,**obs_kwargs)
     obs_jacobian = ojac(state,t,*ojac_args,**ojac_kwargs)
@@ -266,57 +262,61 @@ class KalmanFilter:
       if ojac_kwargs is None:
         ojac_kwargs = obs_kwargs
 
-    if (history_file is None) & (light == False):
-      # history is stored in RAM, which could potentially use many GB
-      history = {'prior':np.zeros((0,self.N)),
-                 'posterior':np.zeros((0,self.N)),
-                 'smooth':np.zeros((0,self.N)),
-                 'prior_covariance':np.zeros((0,self.N,self.N)),
-                 'posterior_covariance':np.zeros((0,self.N,self.N)),
-                 'smooth_covariance':np.zeros((0,self.N,self.N)),
-                 'transition_jacobian':np.zeros((0,self.N,self.N))}
+    # check for valid name, this is useless if core=True
+    d = 0
+    hfile = temp_file 
+    while os.path.exists(temp_file):
+      temp_file = hfile + '_%s' % d
+      d += 1
 
-    elif (history_file is not None) & (light == False):
-      history = h5py.File(history_file,'w')
-      history.create_dataset('prior',
-                             shape=(0,self.N),
-                             maxshape=(None,self.N),
-                             dtype=np.float64,
-                             chunks=True)
+    if core is True:    
+      temp = h5py.File(temp_file,'w',driver='core',backing_store=False)
 
-      history.create_dataset('posterior',
-                             shape=(0,self.N),
-                             maxshape=(None,self.N),
-                             dtype=np.float64,
-                             chunks=True)
-
-      history.create_dataset('smooth',
-                             shape=(0,self.N),
-                             maxshape=(None,self.N),
-                             dtype=np.float64,
-                             chunks=True)
-      history.create_dataset('prior_covariance',
-                             shape=(0,self.N,self.N),
-                             maxshape=(None,self.N,self.N),
-                             dtype=np.float64,
-                             chunks=True)
-      history.create_dataset('posterior_covariance',
-                             shape=(0,self.N,self.N),
-                             maxshape=(None,self.N,self.N),
-                             dtype=np.float64,
-                             chunks=True)
-      history.create_dataset('smooth_covariance',
-                             shape=(0,self.N,self.N),
-                             maxshape=(None,self.N,self.N),
-                             dtype=np.float64,
-                             chunks=True)
-      history.create_dataset('transition_jacobian',
-                             shape=(0,self.N,self.N),
-                             maxshape=(None,self.N,self.N),
-                             dtype=np.float64,
-                             chunks=True)
     else:
-      history = None
+      temp = h5py.File(temp_file,'w')
+
+    self.isopen = True
+    temp.create_dataset('prior',
+                        shape=(0,self.N),
+                        maxshape=(None,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N))
+
+    temp.create_dataset('posterior',
+                        shape=(0,self.N),
+                        maxshape=(None,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N))
+
+    temp.create_dataset('smooth',
+                        shape=(0,self.N),
+                        maxshape=(None,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N))
+
+    temp.create_dataset('prior_covariance',
+                        shape=(0,self.N,self.N),
+                        maxshape=(None,self.N,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N,self.N))
+
+    temp.create_dataset('posterior_covariance',
+                        shape=(0,self.N,self.N),
+                        maxshape=(None,self.N,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N,self.N))
+
+    temp.create_dataset('smooth_covariance',
+                        shape=(0,self.N,self.N),
+                        maxshape=(None,self.N,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N,self.N))
+
+    temp.create_dataset('transition_jacobian',
+                        shape=(0,self.N,self.N),
+                        maxshape=(None,self.N,self.N),
+                        dtype=np.float64,
+                        chunks=(chunk_length,self.N,self.N))
 
     if obs_args is None:
       obs_args = ()
@@ -367,10 +367,9 @@ class KalmanFilter:
     self.tjac_kwargs = tjac_kwargs
     self.pcov_args = pcov_args
     self.pcov_kwargs = pcov_kwargs
-    self.history = history
+    self.history = temp
     self.itr = 0
     self.t = None
-    self.light = light
 
   @funtime
   def update(self,z,cov,t,mask=None):
@@ -388,13 +387,12 @@ class KalmanFilter:
     self.state['posterior'] = out[0]
     self.state['posterior_covariance'] = out[1]
 
-    if self.light == False:
-      adjust_history_size(self.history,self.itr)
-      self.history['prior'][self.itr,:] = self.state['prior']
-      self.history['prior_covariance'][self.itr,:,:] = self.state['prior_covariance']
+    adjust_temp_size(self.history,self.itr)
+    self.history['prior'][self.itr,:] = self.state['prior']
+    self.history['prior_covariance'][self.itr,:,:] = self.state['prior_covariance']
 
-      self.history['posterior'][self.itr,:] = self.state['posterior']
-      self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
+    self.history['posterior'][self.itr,:] = self.state['posterior']
+    self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
       
     self.itr += 1
     self.t = t
@@ -422,9 +420,9 @@ class KalmanFilter:
                                      self.state['posterior_covariance']).dot(
                                      F.transpose()) + Q
 
-    if self.light == False:
-      adjust_history_size(self.history,self.itr)
-      self.history['transition_jacobian'][self.itr,:,:] = F
+    adjust_temp_size(self.history,self.itr)
+    self.history['transition_jacobian'][self.itr,:,:] = F
+
 
   def next(self,data,data_cov,t,mask=None):
     if self.t is not None:
@@ -432,20 +430,25 @@ class KalmanFilter:
 
     self.update(data,data_cov,t,mask=mask)
 
+
   def get_transition_jacobian(self):
     return self.tjac(self.state['posterior'],
                      dt,
                      *self.tjac_args,
                      **self.tjac_kwargs)
 
+
   def get_prior(self):
     return self.state['prior'],self.state['prior_covariance']
+
 
   def get_posterior(self):
     return self.state['posterior'],self.state['posterior_covariance']
 
+
   def get_smooth(self):
     return self.state['smooth'],self.state['smooth_covariance']
+
 
   def filter(self,data,data_covariance,time,mask=None,smooth=False):
     if mask is None:
@@ -461,6 +464,18 @@ class KalmanFilter:
     else:
       return self.get_posterior()    
 
+
+  def close(self):
+    if self.isopen == True:
+      filename = self.history.filename
+      self.history.close()
+      self.isopen = False    
+      if os.path.exists(filename):
+        os.remove(filename) 
+
+  def __del__(self):
+    self.close()
+
   @funtime
   def smooth(self):
     '''
@@ -469,11 +484,6 @@ class KalmanFilter:
     produce undesirable results if the forward problem is highly
     nonlinear
     '''
-    if self.light == True:
-      logger.warning('Cannot use "smooth" method because light flag was raised '
-                     'upon initializating KalmanFilter object')
-      return
-
     n = self.itr
     h = self.history
     h['smooth'][n-1,:] = h['posterior'][n-1,:] 
@@ -491,313 +501,3 @@ class KalmanFilter:
         Ck.dot(h['smooth_covariance'][k+1,:,:] - 
                h['prior_covariance'][k+1,:,:]).dot(Ck.transpose()))
 
-class _KalmanFilter:
-  def __init__(self,prior,prior_cov,
-               transition,
-               observation,
-               process_covariance,
-               transition_jacobian=None,
-               observation_jacobian=None):
-    '''
-    Parameters
-    ----------
-      
-      prior: mean of the prior estimate of the state variable
-
-      prior_cov: covariance of the prior estimate of the state variable
-
-      transition: function which takes a posterior state as the first
-        argument and returns the prior state for the next time step.
-        This function is called in the 'predict' method.
-
-
-      observation: function which takes a state variable as the first
-        argument and returns the predicted obserables. This function
-        is called in the 'update' method.
-
-
-      process_covariance: function which returns the covariance of the
-        process noise, which is the noise introduced by uncertainty in
-        the transition function. This function is called in the
-        'predict' method.
-
-      transition_jacobian (optional): function which returns the
-        derivative of the transition function with respect to the
-        state variable evaluated at the provided state variable. This
-        function is called in the 'predict' method. If not specified
-        then a finite difference approximation of the jacobian is
-        used.
-
-      observation_jacobian (optional): function which returns the
-        derivative of the observation function with respect to the
-        state variable evaluated at the provided state variable. This
-        function is called in the 'update' method. If this is not
-        specified then a finite difference approximation of the
-        jacobian is used.
-
-    Methods
-    -------
-  
-      get: retreive specified state variable
-
-      predict: estimate prior for next time step
-
-      update: compute posterior for current time step
-
-    ''' 
-    if transition_jacobian is None:
-      transition_jacobian = jacobian_fd
-
-    if observation_jacobian is None:
-      observation_jacobian = jacobian_fd
-
-    prior = np.asarray(prior)
-    prior_cov = np.asarray(prior_cov)
-
-    self.transition = transition
-    self.transition_jacobian = transition_jacobian
-    self.observation = observation
-    self.observation_jacobian = observation_jacobian
-    self.process_covariance = process_covariance
-    self.new = {'prior':prior,
-                'prior_covariance':prior_cov,
-                'posterior':None,
-                'posterior_covariance':None,
-                'smooth':None,
-                'smooth_covariance':None,
-                'transition':None}
-    self.state = []
-
-  def _add_state(self):
-    self.state += [self.new]
-    self.new = {'prior':None,
-                'prior_covariance':None,
-                'posterior':None,
-                'posterior_covariance':None,
-                'smooth':None,
-                'smooth_covariance':None,
-                'transition':None}
-
-
-  def get_prior(self):
-    '''returns the prior for the current iteration'''
-    if self.new['prior'] is None:
-      raise ValueError(
-        'prior has not yet been established for current iteration')
-
-    return self.new['prior']
-
-
-  def get_state_history(self,key):
-    '''
-    returns the specified type of state variable for each iteration
-
-    Parameters 
-    ---------- 
-
-      key: can be either 'prior', 'prior_covariance', 'posterior', 'posterior_covariance',
-        'smooth', 'smooth_covariance', or 'transition'
-
-    '''
-    return [i[key] for i in self.state]
-
-
-  @funtime
-  def predict(self,
-              transition_args=None,
-              transition_kwargs=None,
-              jacobian_args=None,
-              jacobian_kwargs=None,
-              process_covariance_args=None,
-              process_covariance_kwargs=None):
-    '''
-    estimates the prior state for the next iteration
-
-    Parameters 
-    ---------- 
-
-      transition_args: additional arguments to be passed to the
-        transition function after the state variable 
-
-      transition_kwargs: additional key word arguments for the
-        transition function 
-
-      jacobian_args: additional arguments to be passed to
-        transition_jacobian after the state variable. If
-        transition_jacobian was not specified the the appropriate
-        arguments for the finite difference approximation function are
-        used.
-
-      jacobian_kwargs: additional key word arguments to be passed to the
-        transition_jacobian function
-
-      process_covariance_args: arguments to be passed to
-        process_covariance
-
-      process_covariance_kwargs: key word arguments to be passed to
-        process_covariance
-
-    '''
-    if transition_args is None:
-      transition_args = ()
-
-    if transition_kwargs is None:
-      transition_kwargs = {}
-
-    if jacobian_args is None:
-      if self.transition_jacobian is jacobian_fd:
-        jacobian_args = (self.transition,)
-      else:
-        jacobian_args = ()
-
-    if jacobian_kwargs is None:
-      if self.transition_jacobian is jacobian_fd:
-        jacobian_kwargs = {'system_args':transition_args,
-                           'system_kwargs':transition_kwargs}
-  
-      else:
-        jacobian_kwargs = {}
-
-    if process_covariance_args is None:
-      process_covariance_args = ()
-
-    if process_covariance_kwargs is None:
-      process_covariance_kwargs = {}
-
-    c = self.state[-1]
-    assert c['posterior'] is not None
-
-    F = self.transition_jacobian(c['posterior'],
-                                 *jacobian_args,
-                                 **jacobian_kwargs)
-
-    Q = self.process_covariance(*process_covariance_args,
-                                **process_covariance_kwargs)
-
-    c['transition'] = F
-
-    self.new['prior'] = self.transition(c['posterior'],
-                                        *transition_args,
-                                        **transition_kwargs)
-
-    self.new['prior_covariance'] = F.dot(
-                                   c['posterior_covariance']).dot(
-                                   F.transpose()) + Q
-
-  @funtime
-  def update(self,z,R,
-             observation_args=None,
-             observation_kwargs=None,
-             jacobian_args=None,
-             jacobian_kwargs=None,
-             solver_kwargs=None):
-    '''
-    uses a nonlinear Bayesian least squares algorithm with the given
-    observables to update the prior for the current state
-
-    Parameters
-    ----------
-
-      z: vector of observables
-  
-      R: covariance of observables
-  
-      observation_args: additional arguments to be passed to the
-        observation function after the state variable
-
-      observation_kwargs: additional key word arguments to be passed
-        to the observation function after the state variable
-
-      jacobian_args: additional arguments to be passed to
-        observation_jacobian after the state variable. If
-        observation_jacobian was not specified the the appropriate
-        arguments for the finite difference approximation function are
-        used.
-
-      jacobian_kwargs: additional key word arguments to be passed to the
-        observation_jacobian function
-    
-      solver_kwargs: additional key word arguments to be passed to
-        inverse.nonlin_lstsq.
-
-    '''
-    if observation_args is None:
-      observation_args = ()
-
-    if observation_kwargs is None:
-      observation_kwargs = {}
-
-    if solver_kwargs is None:
-      solver_kwargs = {}
-
-    if jacobian_args is None:
-      if self.observation_jacobian is jacobian_fd:
-        jacobian_args = (self.observation,)
-      else:
-        jacobian_args = ()
-
-    if jacobian_kwargs is None:
-      if self.observation_jacobian is jacobian_fd:
-        jacobian_kwargs ={'system_args':observation_args,
-                          'system_kwargs':observation_kwargs}
-
-      else:
-        jacobian_kwargs = {}
-
-    out = iekf_update(self.observation,
-                self.observation_jacobian,
-                z,
-                self.new['prior'],
-                R,
-                self.new['prior_covariance'],
-                system_args=observation_args,
-                system_kwargs=observation_kwargs,
-                jacobian_args=jacobian_args,
-                jacobian_kwargs=jacobian_kwargs,
-                **solver_kwargs)
-
-    self.new['posterior'] = out[0]
-    self.new['posterior_covariance'] = out[1]
-
-    self._add_state()               
-
-  @funtime
-  def smooth(self):
-    '''
-    Smoothes the state variables using the Rauch-Tung-Striebel
-    algorithm. This algorithm is intended for linear systems and may
-    produce undesirable results if the forward problem is highly
-    nonlinear
-    '''
-    N = len(self.state)
-    clast = self.state[-1]
-    clast['smooth'] = clast['posterior']
-    clast['smooth_covariance'] = clast['posterior_covariance']
-    for n in range(N-1)[::-1]:
-      cnext = self.state[n+1]
-      ccurr = self.state[n]
-      C = ccurr['posterior_covariance'].dot(
-          ccurr['transition'].transpose()).dot(
-          np.linalg.inv(cnext['prior_covariance']))
-
-      ccurr['smooth'] = (ccurr['posterior'] + 
-                         C.dot( 
-                         cnext['smooth'] -  
-                         cnext['prior']))
-      ccurr['smooth_covariance'] = (ccurr['posterior_covariance'] + 
-                             C.dot(
-                             cnext['smooth_covariance'] - 
-                             cnext['prior_covariance']).dot(
-                             C.transpose()))
-
-    
-
-                    
-    
-  
-
-
-
-
-
-  
