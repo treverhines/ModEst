@@ -270,10 +270,10 @@ class KalmanFilter:
       d += 1
 
     if core is True:    
-      temp = h5py.File(temp_file,'w',driver='core',backing_store=False)
+      temp = h5py.File(temp_file,'w-',driver='core',backing_store=False)
 
     else:
-      temp = h5py.File(temp_file,'w')
+      temp = h5py.File(temp_file,'w-')
 
     self.isopen = True
     temp.create_dataset('prior',
