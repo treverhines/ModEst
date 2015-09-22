@@ -72,8 +72,13 @@ def iekf_update(system,
 
   res_m = data_m - pred_m
 
+  #def norm(r):
+  #  return r.dot(np.linalg.inv(Cdata_m)).dot(r)     
+  
+  # note that the norm is not using the data covariance for the sake
+  # of computational efficiency
   def norm(r):
-    return r.dot(np.linalg.inv(Cdata_m)).dot(r)     
+    return r.dot(r)     
 
   conv = Converger(atol,rtol,maxitr,norm=norm)
   status,message = conv.check(res_m,set_residual=True)
