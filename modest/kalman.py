@@ -13,6 +13,39 @@ import scipy.linalg
 
 logger = logging.getLogger(__name__)
 
+
+def nonlin_lstsq_update(system,
+                        jacobian,
+                        data,
+                        prior,
+                        Cdata,
+                        Cprior,
+                        system_args=None,
+                        system_kwargs=None,
+                        jacobian_args=None,
+                        jacobian_kwargs=None,
+                        rtol=1e-6,
+                        atol=1e-6,
+                        maxitr=10,
+                        mask=None,**kwargs):
+  if mask is None:
+    mask = np.zeros(len(data),dtype=bool)
+  not_mask = ~mask   
+  return nonlin_lstsq(system,
+                      data,
+                      prior,
+                      data_covariance=Cdata,
+                      prior_covariance=Cprior,
+                      system_args=system_args,
+                      system_kwargs=system_kwargs,
+                      jacobian_args=jacobian_args,
+                      jacobian_kwargs=jacobian_kwargs,
+                      rtol=rtol,
+                      atol=atol,
+                      maxitr=maxitr,
+                      data_indices=np.nonzero(not_mask)[0],
+                      output=['solution','solution_uncertainty'],
+                      **kwargs)
 @funtime
 def iekf_update(system,
                 jacobian,
@@ -213,6 +246,7 @@ class KalmanFilter:
                ojac=None,  
                ojac_args=None,
                ojac_kwargs=None,
+               solver=iekf_update,
                solver_kwargs=None, 
                state_rate_cov=None,
                temp_file='.temp.h5',
@@ -265,15 +299,22 @@ class KalmanFilter:
     # check for valid name, this is useless if core=True
     d = 0
     hfile = temp_file 
-    while os.path.exists(temp_file):
-      temp_file = hfile + '_%s' % d
-      d += 1
-
     if core is True:    
-      temp = h5py.File(temp_file,'w-',driver='core',backing_store=False)
-
+      while True:
+        try:
+          temp = h5py.File(temp_file,'w-',driver='core',backing_store=False)
+          break
+        except IOError:
+          temp_file = hfile + '_%s' % d
+          d += 1        
     else:
-      temp = h5py.File(temp_file,'w-')
+      while True:
+        try:
+          temp = h5py.File(temp_file,'w-')
+          break
+        except IOError:
+          temp_file = hfile + '_%s' % d
+          d += 1        
 
     self.isopen = True
     temp.create_dataset('prior',
@@ -358,6 +399,7 @@ class KalmanFilter:
     self.ojac = ojac
     self.obs_args = obs_args
     self.obs_kwargs = obs_kwargs
+    self.solver = solver
     self.solver_kwargs = solver_kwargs
     self.ojac_args = ojac_args
     self.ojac_kwargs = ojac_kwargs
@@ -374,7 +416,7 @@ class KalmanFilter:
   @funtime
   def update(self,z,cov,t,mask=None):
     logging.info('updating prior with observations at time %s (iteration %s)' % (t,self.itr))
-    out = iekf_update(self.obs,self.ojac,z,
+    out = self.solver(self.obs,self.ojac,z,
                       self.state['prior'],cov,
                       self.state['prior_covariance'],
                       system_args=(t,)+self.obs_args,
