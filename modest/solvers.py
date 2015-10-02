@@ -8,6 +8,7 @@ import scipy.optimize
 import scipy.sparse.linalg
 import scipy.linalg
 import pymls
+import bvls as _bvls
 from converger import Converger
 import logging
 from timing import funtime
@@ -52,6 +53,33 @@ def nnls(G,d,*args,**kwargs):
   '''
   out = scipy.optimize.nnls(G,d,*args,**kwargs)[0]
   return out
+
+@funtime
+@_arg_checker
+def bvls(G,d,lower_lim,upper_lim):
+  '''
+  wrapper for pymls.bounded_lsq
+
+  finds m minimizes ||Gm - d|| subject to the constraint that
+
+    lower_lim[i] < m[i] < upper_lim[i]
+
+  Parameters
+  ----------
+    G: system matrix (N,M)
+    d: data vector (N,)
+    lower_lim: lower limit on m (M,)
+    upper_lim: upper limit on m (M,)
+
+  Returns
+  -------
+    best fit model vector with the applied constraints (M,)
+
+  '''
+  d = np.array(d,copy=True)
+  bounds = np.array([lower_lim,upper_lim])
+  (soln,rnorm,nstep,w,index,err) = _bvls.bvls(G,d,bounds)
+  return soln
 
 @funtime
 @_arg_checker
