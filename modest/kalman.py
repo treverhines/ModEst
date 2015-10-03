@@ -13,6 +13,40 @@ import scipy.linalg
 
 logger = logging.getLogger(__name__)
 
+
+def nonlin_lstsq_update(system,
+                        jacobian,
+                        data,
+                        prior,
+                        Cdata,
+                        Cprior,
+                        system_args=None,
+                        system_kwargs=None,
+                        jacobian_args=None,
+                        jacobian_kwargs=None,
+                        rtol=1e-6,
+                        atol=1e-6,
+                        maxitr=10,
+                        mask=None,**kwargs):
+  if mask is None:
+    mask = np.zeros(len(data),dtype=bool)
+  not_mask = ~mask   
+  return nonlin_lstsq(system,
+                      data,
+                      prior,
+                      jacobian=jacobian,
+                      data_covariance=Cdata,
+                      prior_covariance=Cprior,
+                      system_args=system_args,
+                      system_kwargs=system_kwargs,
+                      jacobian_args=jacobian_args,
+                      jacobian_kwargs=jacobian_kwargs,
+                      rtol=rtol,
+                      atol=atol,
+                      maxitr=maxitr,
+                      data_indices=np.nonzero(not_mask)[0],
+                      output=['solution','solution_uncertainty'],
+                      **kwargs)
 @funtime
 def iekf_update(system,
                 jacobian,
@@ -218,10 +252,12 @@ class KalmanFilter:
                ojac=None,  
                ojac_args=None,
                ojac_kwargs=None,
+               solver=iekf_update,
                solver_kwargs=None, 
                state_rate_cov=None,
                temp_file='.temp.h5',
                core=True,
+               light=False, 
                chunk_length=100):
     '''
     data = obs(state,t,*obs_args,**obs_kwargs)
@@ -268,60 +304,71 @@ class KalmanFilter:
         ojac_kwargs = obs_kwargs
 
     # check for valid name, this is useless if core=True
-    d = 0
-    hfile = temp_file 
-    while os.path.exists(temp_file):
-      temp_file = hfile + '_%s' % d
-      d += 1
+    if light:
+      self.isopen = False
 
-    if core is True:    
-      temp = h5py.File(temp_file,'w-',driver='core',backing_store=False)
+    if not light:
+      d = 0
+      hfile = temp_file 
+      if core is True:    
+        while True:
+          try:
+            temp = h5py.File(temp_file,'w-',driver='core',backing_store=False)
+            break
+          except IOError:
+            temp_file = hfile + '_%s' % d
+            d += 1        
+      else:
+        while True:
+          try:
+            temp = h5py.File(temp_file,'w-')
+            break
+          except IOError:
+            temp_file = hfile + '_%s' % d
+            d += 1        
 
-    else:
-      temp = h5py.File(temp_file,'w-')
+      self.isopen = True
+      temp.create_dataset('prior',
+                          shape=(0,self.N),
+                          maxshape=(None,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N))
 
-    self.isopen = True
-    temp.create_dataset('prior',
-                        shape=(0,self.N),
-                        maxshape=(None,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N))
+      temp.create_dataset('posterior',
+                          shape=(0,self.N),
+                          maxshape=(None,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N))
 
-    temp.create_dataset('posterior',
-                        shape=(0,self.N),
-                        maxshape=(None,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N))
+      temp.create_dataset('smooth',
+                          shape=(0,self.N),
+                          maxshape=(None,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N))
 
-    temp.create_dataset('smooth',
-                        shape=(0,self.N),
-                        maxshape=(None,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N))
+      temp.create_dataset('prior_covariance',
+                          shape=(0,self.N,self.N),
+                          maxshape=(None,self.N,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N,self.N))
 
-    temp.create_dataset('prior_covariance',
-                        shape=(0,self.N,self.N),
-                        maxshape=(None,self.N,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N,self.N))
+      temp.create_dataset('posterior_covariance',
+                          shape=(0,self.N,self.N),
+                          maxshape=(None,self.N,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N,self.N))
 
-    temp.create_dataset('posterior_covariance',
-                        shape=(0,self.N,self.N),
-                        maxshape=(None,self.N,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N,self.N))
+      temp.create_dataset('smooth_covariance',
+                          shape=(0,self.N,self.N),
+                          maxshape=(None,self.N,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N,self.N))
 
-    temp.create_dataset('smooth_covariance',
-                        shape=(0,self.N,self.N),
-                        maxshape=(None,self.N,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N,self.N))
-
-    temp.create_dataset('transition_jacobian',
-                        shape=(0,self.N,self.N),
-                        maxshape=(None,self.N,self.N),
-                        dtype=np.float64,
-                        chunks=(chunk_length,self.N,self.N))
+      temp.create_dataset('transition_jacobian',
+                          shape=(0,self.N,self.N),
+                          maxshape=(None,self.N,self.N),
+                          dtype=np.float64,
+                          chunks=(chunk_length,self.N,self.N))
 
     if obs_args is None:
       obs_args = ()
@@ -363,6 +410,7 @@ class KalmanFilter:
     self.ojac = ojac
     self.obs_args = obs_args
     self.obs_kwargs = obs_kwargs
+    self.solver = solver
     self.solver_kwargs = solver_kwargs
     self.ojac_args = ojac_args
     self.ojac_kwargs = ojac_kwargs
@@ -372,14 +420,16 @@ class KalmanFilter:
     self.tjac_kwargs = tjac_kwargs
     self.pcov_args = pcov_args
     self.pcov_kwargs = pcov_kwargs
-    self.history = temp
+    self.light = light
+    if not self.light:
+      self.history = temp
     self.itr = 0
     self.t = None
 
   @funtime
   def update(self,z,cov,t,mask=None):
     logging.info('updating prior with observations at time %s (iteration %s)' % (t,self.itr))
-    out = iekf_update(self.obs,self.ojac,z,
+    out = self.solver(self.obs,self.ojac,z,
                       self.state['prior'],cov,
                       self.state['prior_covariance'],
                       system_args=(t,)+self.obs_args,
@@ -392,12 +442,13 @@ class KalmanFilter:
     self.state['posterior'] = out[0]
     self.state['posterior_covariance'] = out[1]
 
-    adjust_temp_size(self.history,self.itr)
-    self.history['prior'][self.itr,:] = self.state['prior']
-    self.history['prior_covariance'][self.itr,:,:] = self.state['prior_covariance']
+    if not self.light:
+      adjust_temp_size(self.history,self.itr)
+      self.history['prior'][self.itr,:] = self.state['prior']
+      self.history['prior_covariance'][self.itr,:,:] = self.state['prior_covariance']
 
-    self.history['posterior'][self.itr,:] = self.state['posterior']
-    self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
+      self.history['posterior'][self.itr,:] = self.state['posterior']
+      self.history['posterior_covariance'][self.itr,:,:] = self.state['posterior_covariance']
       
     self.itr += 1
     self.t = t
@@ -425,8 +476,9 @@ class KalmanFilter:
                                      self.state['posterior_covariance']).dot(
                                      F.transpose()) + Q
 
-    adjust_temp_size(self.history,self.itr)
-    self.history['transition_jacobian'][self.itr,:,:] = F
+    if not self.light:
+      adjust_temp_size(self.history,self.itr)
+      self.history['transition_jacobian'][self.itr,:,:] = F
 
 
   def next(self,data,data_cov,t,mask=None):
@@ -441,7 +493,6 @@ class KalmanFilter:
                      dt,
                      *self.tjac_args,
                      **self.tjac_kwargs)
-
 
   def get_prior(self):
     return self.state['prior'],self.state['prior_covariance']
@@ -469,7 +520,6 @@ class KalmanFilter:
     else:
       return self.get_posterior()    
 
-
   def close(self):
     if self.isopen == True:
       filename = self.history.filename
@@ -489,6 +539,10 @@ class KalmanFilter:
     produce undesirable results if the forward problem is highly
     nonlinear
     '''
+    if self.light:
+      print('smooth method not available for when initiated with light mode')
+      return
+
     n = self.itr
     h = self.history
     h['smooth'][n-1,:] = h['posterior'][n-1,:] 

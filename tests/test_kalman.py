@@ -53,6 +53,7 @@ data_reg_cov_kf = np.array([scipy.linalg.block_diag(i,np.eye(2)) for i in data_c
 data_cov = scipy.linalg.block_diag(*data_cov_kf)
 
 model_prior = np.array([3.0,3.0])
+#model_prior = np.array([-0.1,-0.1])
 model_prior_cov = 5.0*np.eye(2)
 
 reg_mat = np.eye(2)
@@ -78,22 +79,67 @@ class Test(unittest.TestCase):
     self.assertTrue(np.all(np.isclose(soln1,soln2)))
     self.assertTrue(np.all(np.isclose(cov1,cov2)))
 
+  def test_bayes_least_squares_alternate_solver(self):
+    soln1,cov1 = modest.nonlin_lstsq(system,
+                                data,
+                                model_prior,
+                                data_covariance=data_cov,
+                                prior_covariance=model_prior_cov,
+                                system_args=(time,),
+                                output=['solution','solution_uncertainty'])
+    
+    kf = modest.KalmanFilter(model_prior,
+                             model_prior_cov,
+                             system_kf,
+                             solver=modest.nonlin_lstsq_update)
+
+    kf.filter(data_kf,data_cov_kf,time)
+    soln2,cov2 = kf.get_posterior()
+    kf.close()
+    self.assertTrue(np.all(np.isclose(soln1,soln2)))
+    self.assertTrue(np.all(np.isclose(cov1,cov2)))
+
   def test_reg_bayes_least_squares(self):
-    soln1 = modest.nonlin_lstsq(system,
+    soln0 = modest.nonlin_lstsq(system,
                                 data,
                                 model_prior,
                                 data_covariance=data_cov,
                                 prior_covariance=model_prior_cov,
                                 system_args=(time,),
                                 regularization=reg_mat)
-    kf = modest.KalmanFilter(model_prior,
+    kf1 = modest.KalmanFilter(model_prior,
                              model_prior_cov,
                              system_reg_kf,
                              obs_args=(0.25819889*reg_mat,))
-    kf.filter(data_reg_kf,data_reg_cov_kf,time)
-    soln2 = kf.get_posterior()[0]
-    kf.close()
-    self.assertTrue(np.all(np.isclose(soln1,soln2)))
+    kf2 = modest.KalmanFilter(model_prior,
+                              model_prior_cov,
+                              system_kf,
+                              solver=modest.nonlin_lstsq_update,
+                              solver_kwargs={'regularization':0.25819889*reg_mat})
+    kf1.filter(data_reg_kf,data_reg_cov_kf,time)
+    soln1 = kf1.get_posterior()[0]
+    kf2.filter(data_kf,data_cov_kf,time)
+    soln2 = kf2.get_posterior()[0]
+    kf1.close()
+    kf2.close()
+    self.assertTrue(np.all(np.isclose(soln0,soln1,soln2)))
+
+  def test_nonnegativity(self):
+    soln0 = modest.nonlin_lstsq(system,
+                                data,
+                                model_prior,
+                                data_covariance=data_cov,
+                                prior_covariance=model_prior_cov,
+                                system_args=(time,),
+                                solver=modest.nnls)
+    kf1 = modest.KalmanFilter(model_prior,
+                              model_prior_cov,
+                              system_kf,
+                              solver=modest.nonlin_lstsq_update,
+                              solver_kwargs={'solver':modest.nnls})
+    kf1.filter(data_kf,data_cov_kf,time)
+    soln1 = kf1.get_posterior()[0]
+    self.assertTrue(np.all(np.isclose(soln0,soln1)))
 
   def test_masked_arrays(self):
     data_indices = [1,2,3,5,6,7,8,10,12]
