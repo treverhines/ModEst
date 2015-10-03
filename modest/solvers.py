@@ -8,7 +8,7 @@ import scipy.optimize
 import scipy.sparse.linalg
 import scipy.linalg
 import pymls
-import bvls as _bvls
+import _bvls
 from converger import Converger
 import logging
 from timing import funtime
@@ -57,69 +57,58 @@ def nnls(G,d,*args,**kwargs):
 @funtime
 @_arg_checker
 def bvls(G,d,lower_lim,upper_lim):
-  '''
-  wrapper for pymls.bounded_lsq
-
-  finds m minimizes ||Gm - d|| subject to the constraint that
-
-    lower_lim[i] < m[i] < upper_lim[i]
-
-  Parameters
+  '''                                                                                         
+  Bounded Value Least Squares
+                                                               
+  This is a python wrapper of the Fortran90 bvls module originally    
+  written by Charles Lawson and Richard Hanson and then modified by John   
+  Burkardt. 
+                                                                                 
+  PARAMETERS
   ----------
-    G: system matrix (N,M)
-    d: data vector (N,)
-    lower_lim: lower limit on m (M,)
-    upper_lim: upper limit on m (M,)
+    G : (M,N) system matrix mapping the model vector to observation vector
+    d : (M,) observation vector
+    lower_bounds : (N,) vector for the lower bounds on the model vector
+    upper_bounds : (N,) vector for the upper bounds on the model vector
 
-  Returns
+  RETURNS
   -------
-    best fit model vector with the applied constraints (M,)
+    m : (N,) vector that satisfies min(||Gm - d||) subject to the imposed
+        constraints
 
+  USAGE             
+  -----              
+    >>>import bvls                             
+    >>>G = np.random.random((10,2))      
+    >>>m = np.array([1.0,2.0])         
+    >>>d = G.dot(m)                        
+    >>>lower_bounds = np.array([0.0,0.0])           
+    >>>upper_bounds = np.array([1.5,1.5])           
+    >>>output = bvls.bvls(G,d,lower_bounds,upper_bounds) 
+    >>>m_est = output[0]               
   '''
-  d = np.array(d,copy=True)
   bounds = np.array([lower_lim,upper_lim])
   (soln,rnorm,nstep,w,index,err) = _bvls.bvls(G,d,bounds)
+  if err == 0:
+    logger.debug('exit status 0: Solution completed')
+
+  if err == 1:
+    print('exit status 1: M  <=  0 or N  <=  0 ')
+    logger.debug('exit status 1: M  <=  0 or N  <=  0 ')
+
+  if err == 2:
+    print('exit status 2: B(:), X(:), BND(:,:), W(:), or INDEX(:) size or shape violation')
+    logger.debug('exit status 2: B(:), X(:), BND(:,:), W(:), or INDEX(:) size or shape violation')
+
+  if err == 3:
+    print('exit status 3: Input bounds are inconsistent')
+    logger.warning('exit status 3: Input bounds are inconsistent')
+
+  if err == 4:
+    print('exit status 4: Exceed maximum number of iterations')
+    logger.warning('exit status 4: Exceed maximum number of iterations')
+
   return soln
-
-@funtime
-@_arg_checker
-def bounded_lstsq(G,d,lower_lim,upper_lim):
-  '''
-  wrapper for pymls.bounded_lsq
-
-  finds m minimizes ||Gm - d|| subject to the constraint that
-
-    lower_lim[i] < m[i] < upper_lim[i]
-
-  Parameters
-  ----------
-    G: system matrix (N,M)
-    d: data vector (N,)
-    lower_lim: lower limit on m (M,)
-    upper_lim: upper limit on m (M,)
-
-  Returns
-  -------
-    best fit model vector with the applied constraints (M,)
-
-  '''
-  lower_lim = np.asarray(lower_lim)
-  upper_lim = np.asarray(upper_lim)
-  llim_shape = np.shape(lower_lim)
-  ulim_shape = np.shape(upper_lim)
-  G_shape = np.shape(G)
-  assert llim_shape == (G_shape[1],), ('lower_lim must be a 1D vector with '
-                                       'length equal to the number of model '
-                                       'parameters')
-  assert ulim_shape == (G_shape[1],), ('upper_lim must be a 1D vector with '
-                                       'length equal to the number of model '
-                                       'parameters')
-  d = d[:,None]
-  lower_lim = lower_lim[:,None]
-  upper_lim = upper_lim[:,None]
-  out = pymls.bounded_lsq(G,d,lower_lim,upper_lim)
-  out = np.squeeze(out)
-  return out
 
 
 @funtime
