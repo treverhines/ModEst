@@ -101,7 +101,7 @@ subroutine bvls ( m, n, a, b, bnd, x, rnorm, nsetp, w, index, ierr )
 !  Local Parameters:
 !
 !   ITMAX  [integer]
-!       Set to 3*N.  Maximum number of iterations permitted.
+!       Set to 100*N.  Maximum number of iterations permitted.
 !       This is usually larger than required.  Library software will
 !       likely make this an optional argument.
 !
@@ -580,7 +580,7 @@ subroutine initialize ( m, n, a, b, bnd, ierr, index, iter, itmax, &
   real ( kind = 8 ) x(n)
 
   ierr = 0
-  itmax = 3 * n
+  itmax = 100 * n
   iter = 0
 !
 !  Initialize the array index().
