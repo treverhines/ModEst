@@ -13,7 +13,3 @@ documentation for these features.
 
 Install ModEst with the shell command "python setup.py install"
 
-Note, there seems to be a bug with bounded_lstsq, which means that you
-may not get the correct solution when trying to put arbitrary bounds
-on the model parameters for when using nonlin_lstsq.  nnls still works
-and forces model parameters to be nonnegative.
