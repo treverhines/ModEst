@@ -85,7 +85,6 @@ def covariance_to_weight(C):
   N = np.shape(C)[0]
   A = np.linalg.cholesky(C)
   W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True)
-
   return W
   
 ##------------------------------------------------------------------------------
