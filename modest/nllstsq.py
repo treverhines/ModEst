@@ -2,6 +2,7 @@
 import numpy as np
 import logging
 import solvers
+import timing
 from converger import Converger
 from tikhonov import Perturb
 from tikhonov import tikhonov_matrix
@@ -461,10 +462,13 @@ def nonlin_lstsq(*args,**kwargs):
   # covariance matrix which includes data cov, and prior cov
   data_cov = p['data_covariance']
   data_cov = data_cov[np.ix_(p['data_indices'],p['data_indices'])]
+  timing.tic()
   data_cov_inv = np.linalg.inv(data_cov)
+  timing.toc()
   prior_cov_inv = np.linalg.inv(p['prior_covariance'])
   reg_cov_inv = np.eye(len(p['regularization']))
   lm_cov_inv = np.eye(len(p['lm_matrix']))
+
   Cdinv = scipy.linalg.block_diag(
               data_cov_inv,
               reg_cov_inv,
@@ -496,7 +500,9 @@ def nonlin_lstsq(*args,**kwargs):
   while not ((status == 0) | (status == 3)):
     # I want:
     # m_new = p['solver'](J.transpose()Cdinv.dot(J)
+
     JtCdinv = J.transpose().dot(Cdinv)
+
     m_new = p['solver'](JtCdinv.dot(J),
                         JtCdinv.dot(-d+J.dot(p['m_k'])),
                         *p['solver_args'],
