@@ -67,7 +67,7 @@ class Test(unittest.TestCase):
                                 data_covariance=data_cov,
                                 prior_covariance=model_prior_cov,
                                 system_args=(time,),
-                                output=['solution','solution_uncertainty'])
+                                output=['solution','solution_covariance'])
     
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,
@@ -86,7 +86,7 @@ class Test(unittest.TestCase):
                                 data_covariance=data_cov,
                                 prior_covariance=model_prior_cov,
                                 system_args=(time,),
-                                output=['solution','solution_uncertainty'])
+                                output=['solution','solution_covariance'])
     
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,
@@ -152,7 +152,7 @@ class Test(unittest.TestCase):
                                 prior_covariance=model_prior_cov,
                                 data_indices=data_indices, 
                                 system_args=(time,),
-                                output=['solution','solution_uncertainty'])
+                                output=['solution','solution_covariance'])
 
     kf = modest.KalmanFilter(model_prior,
                              model_prior_cov,

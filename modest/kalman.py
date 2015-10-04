@@ -45,7 +45,7 @@ def nonlin_lstsq_update(system,
                       atol=atol,
                       maxitr=maxitr,
                       data_indices=np.nonzero(not_mask)[0],
-                      output=['solution','solution_uncertainty'],
+                      output=['solution','solution_covariance'],
                       **kwargs)
 @funtime
 def iekf_update(system,
@@ -232,6 +232,7 @@ def adjust_temp_size(history,itr):
       s = history[k].shape[0]
       if s <= itr:
         history[k].resize(itr+pad_length,0)
+
 
 class KalmanFilter:
   def __init__(self,

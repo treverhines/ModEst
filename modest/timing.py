@@ -115,8 +115,10 @@ def funtime(fun):
   def subfun(*args,**kwargs):
     t = Timer()
     GLOBAL_TIMER.tic(fun.__name__)
-    out = fun(*args,**kwargs)
-    GLOBAL_TIMER.toc(fun.__name__)
+    try:
+      out = fun(*args,**kwargs)
+    finally: 
+      GLOBAL_TIMER.toc(fun.__name__)
     return out
   return subfun
 

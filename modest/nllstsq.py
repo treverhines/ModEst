@@ -2,6 +2,7 @@
 import numpy as np
 import logging
 import solvers
+import timing
 from converger import Converger
 from tikhonov import Perturb
 from tikhonov import tikhonov_matrix
@@ -84,15 +85,15 @@ def covariance_to_weight(C):
   N = np.shape(C)[0]
   A = np.linalg.cholesky(C)
   W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True)
-
   return W
   
+def isdiagonal(A):
+  return np.all(np.diag(np.diag(A)) == A)
+
 ##------------------------------------------------------------------------------
 def _residual(system,
                data,
-               data_weight,
                prior,
-               prior_weight,
                system_args,
                system_kwargs,
                jacobian,
@@ -100,6 +101,7 @@ def _residual(system,
                jacobian_kwargs,
                reg_matrix,
                lm_matrix,
+               bayes_matrix,
                data_indices):
 
   '''
@@ -109,24 +111,50 @@ def _residual(system,
   def residual_function(model):
     '''
     evaluates the function to be minimized for the given model
+
+    Jt*Cd^-1*J*m = (JtCdJ*m0 + Jt*Cd*d  
+    This is Jt*Cd^-1*d
     '''
     pred = system(model,*system_args,**system_kwargs)
-    res = data_weight.dot(pred - data)
+    res = pred - data
+    #res = data_weight.dot(pred - data)
     res = res[data_indices]
     reg = reg_matrix.dot(model)    
-    lm = np.zeros(np.shape(lm_matrix)[0])
-    bayes = prior_weight.dot(model - prior)
+    lm = lm_matrix.dot(0*model)
+    bayes = bayes_matrix.dot(model - prior)
+    #bayes = prior_weight.dot(model - prior)
     return np.hstack((res,reg,lm,bayes))
 
   @funtime
   def residual_jacobian(model):
     '''
     evaluates the jacobian of the objective function at the given model
+
+    The Jacobian consists of:
+
+     |    df/dm   |
+     |    L_r     |
+     |    L_l     |
+     |    L_b     |
+    
+    where
+    
+    df/dm is the derivative of the system with respect to the model
+    parameters evaluated at the current model 
+
+    L_r is the regularization matrix
+
+    L_l is an identity matrix or an empty array depending on whether
+    Levenberg Marquardt damping is used
+
+    L_b is an identity matrix or an empty array depending on whether 
+    Bayesian least squares is used
+
     '''
     jac = jacobian(model,*jacobian_args,**jacobian_kwargs)
-    jac = data_weight.dot(jac)
     jac = jac[data_indices,:]
-    return np.vstack((jac,reg_matrix,lm_matrix,prior_weight))
+    out = np.vstack((jac,reg_matrix,lm_matrix,bayes_matrix))
+    return out
 
   return residual_function,residual_jacobian
 
@@ -143,12 +171,8 @@ def _arg_parser(args,kwargs):
        'maxitr':50,
        'rtol':1.0e-4,
        'atol':1.0e-4,
-       'data_uncertainty':None,
        'data_covariance':None,
-       'data_weight':None,
-       'prior_uncertainty':None,
        'prior_covariance':None,
-       'prior_weight':None,
        'system_args':None,
        'system_kwargs':None,
        'jacobian':None,
@@ -179,78 +203,19 @@ def _arg_parser(args,kwargs):
   p['prior'] = np.copy(p['m_k'])
 
   # assert that only one type of prior uncertainty is given      
-  assert np.sum([p['prior_uncertainty'] is not None,
-                 p['prior_covariance'] is not None,
-                 p['prior_weight'] is not None]) <= 1, (
-  'Multiple types of prior uncertainty were specified')    
-
-  assert np.sum([p['data_uncertainty'] is not None,
-                 p['data_covariance'] is not None,
-                 p['data_weight'] is not None]) <= 1, (
-  'Multiple types of data uncertainty were specified')    
-
-  # use whatever form of data uncertainty was provided to form the 
-  # data weight matrix
-  if p['data_weight'] is not None:
-    p['data_weight'] = np.asarray(p['data_weight'])
-
-  elif p['data_uncertainty'] is not None:
-    if len(np.shape(p['data_uncertainty'])) == 1:
-      sig = np.asarray(p['data_uncertainty'])
-      p['data_weight'] = np.diag(1.0/sig)
-
-    elif len(np.shape(p['data_uncertainty'])) == 2:
-      cov = np.asarray(p['data_uncertainty'])
-      p['data_weight'] = covariance_to_weight(cov)
-      logger.warning(
-        'use the data_covariance kwarg to specify covariance')
-
-    else:
-      raise ValueError(
-        'data uncertainty must be 1 or 2 dimensional array')
-
-  elif p['data_covariance'] is not None:
-    cov = np.asarray(p['data_covariance'])
-    p['data_weight'] = covariance_to_weight(cov)
+  if p['data_covariance'] is not None:
+    p['data_covariance'] = np.asarray(p['data_covariance'])
 
   else:
-    # if not data uncertainty was provided then weigh data with 
-    # an identity matrix
-    p['data_weight'] = np.eye(len(p['data']))
+    p['data_covariance'] = np.eye(len(p['data']))
 
-  assert np.sum([p['prior_uncertainty'] is not None,
-                 p['prior_covariance'] is not None,
-                 p['prior_weight'] is not None]) <= 1, (
-  'Multiple types of data uncertainty were specified')    
-
-  # use whatever form of prior uncertainty was provided to form 
-  # the prior weight matrix
-  if p['prior_weight'] is not None:
-    p['prior_weight'] = np.asarray(p['prior_weight'])
-
-  elif p['prior_uncertainty'] is not None:
-    if len(np.shape(p['prior_uncertainty'])) == 1:
-      sig = np.asarray(p['prior_uncertainty'])
-      p['prior_weight'] = np.diag(1.0/sig)
-
-    elif len(np.shape(p['prior_uncertainty'])) == 2:
-      cov = np.asarray(p['prior_uncertainty'])
-      p['prior_weight'] = covariance_to_weight(cov)
-      logger.warning(
-        'use the prior_covariance kwarg to specify covariance')
-
-    else:
-      raise ValueError(
-        'data uncertainty must be 1 or 2 dimensional array')
-
-  elif p['prior_covariance'] is not None:
-    cov = np.asarray(p['prior_covariance'])
-    p['prior_weight'] = covariance_to_weight(cov)
+  if p['prior_covariance'] is not None:
+    p['prior_covariance'] = np.asarray(p['prior_covariance'])
+    p['bayes_matrix'] = np.eye(len(p['m_k']))
 
   else:
-    # if no prior uncertainty is given, then the prior has no influence
-    # on the final solution 
-    p['prior_weight'] = np.zeros((0,len(p['m_k'])))
+    p['prior_covariance'] = np.zeros((0,0))
+    p['bayes_matrix'] = np.zeros((0,len(p['m_k'])))
 
   if p['system_args'] is None:
     p['system_args'] = []
@@ -376,23 +341,13 @@ def nonlin_lstsq(*args,**kwargs):
     solver_kwargs: additional key word arguments for the solver 
       (default: None)
 
-    data_uncertainty: Vector of one standard deviation uncertainties
-      for each data value.  This should be used if the data is assumed
-      to be uncorrelated
+    data_covariance: data covariance matrix.  This can be any square
+      array (sparse or dense) as long as it has the 'dot' method
+      (default: np.eye(N))
 
-                        OR
-
-      data covariance matrix.  This can any square array (sparse or
-      dense) as long as it has the 'dot' method (default: np.eye(N))
-
-    prior_uncertainty: Vector of one standard deviation uncertainties
-      for each prior value.  This should be used if the prior is assumed
-      to be uncorrelated
-
-                        OR
-
-      prior covariance matrix.  This can any square array (sparse or
-      dense) as long as it has the 'dot' method (default: np.eye(M))
+    prior_covariance: prior covariance matrix.  This can any square
+      array (sparse or dense) as long as it has the 'dot' method
+      (default: np.eye(M))
 
     regularization: regularization matrix scaled by the penalty
       parameter.  This is a (*,M) array.
@@ -439,7 +394,7 @@ def nonlin_lstsq(*args,**kwargs):
   Usage
   -----  
     In [1]: import numpy as np
-    In [2]: from inverse import nonlin_lstsq
+    In [2]: from modest import nonlin_lstsq
     In [3]: def system(m,x):
      ...:     return m[0] + m[1]*m[0]*x
      ...: 
@@ -484,7 +439,7 @@ def nonlin_lstsq(*args,**kwargs):
   and maximum values for the model parameters
 
     In [25]: nonlin_lstsq(system,data,2,system_args=(x,),
-                          solver=inverse.bounded_lstsq,
+                          solver=modest.bvls,
                           solver_args=([2.0,0.0],[2.0,100.0]))
     Out[25]: array([ 2., 5.])
 
@@ -493,9 +448,7 @@ def nonlin_lstsq(*args,**kwargs):
  
   res_func,res_jac = _residual(p['system'],
                                p['data'],
-                               p['data_weight'],
                                p['prior'],
-                               p['prior_weight'],
                                p['system_args'],
                                p['system_kwargs'],
                                p['jacobian'],
@@ -503,9 +456,42 @@ def nonlin_lstsq(*args,**kwargs):
                                p['jacobian_kwargs'],
                                p['regularization'],
                                p['lm_matrix'],
+                               p['bayes_matrix'],
                                p['data_indices'])
 
-  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'])
+
+  # covariance matrix which includes data cov, and prior cov
+  data_cov = p['data_covariance']
+  data_cov = data_cov[np.ix_(p['data_indices'],p['data_indices'])]
+  if isdiagonal(data_cov):
+    data_cov_inv = np.diag(1.0/np.diag(data_cov))
+  else:  
+    data_cov_inv = np.linalg.inv(data_cov)
+
+  prior_cov = p['prior_covariance']
+  if isdiagonal(prior_cov):
+    prior_cov_inv = np.diag(1.0/np.diag(prior_cov))
+  else:
+    prior_cov_inv = np.linalg.inv(prior_cov)
+
+  reg_cov_inv = np.eye(len(p['regularization']))
+  lm_cov_inv = np.eye(len(p['lm_matrix']))
+
+  Cdinv = scipy.linalg.block_diag(
+              data_cov_inv,
+              reg_cov_inv,
+              lm_cov_inv,
+              prior_cov_inv) 
+
+  Cdinv_is_diagonal = isdiagonal(Cdinv)
+  @funtime
+  def norm(x):
+    if Cdinv_is_diagonal:
+      return (x**2).dot(np.diag(Cdinv))
+    else:
+      return x.dot(Cdinv).dot(x)
+
+  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'],norm=norm)
 
   J = res_jac(p['m_k'])
   J = np.asarray(J,dtype=p['dtype'])
@@ -528,7 +514,13 @@ def nonlin_lstsq(*args,**kwargs):
     logger.debug('initial guess ' + message)
 
   while not ((status == 0) | (status == 3)):
-    m_new = p['solver'](J,-d+J.dot(p['m_k']),
+    if Cdinv_is_diagonal:
+      JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+    else:
+      JtCdinv = J.transpose().dot(Cdinv)
+
+    m_new = p['solver'](JtCdinv.dot(J),
+                        JtCdinv.dot(-d+J.dot(p['m_k'])),
                         *p['solver_args'],
                         **p['solver_kwargs'])
     d_new = res_func(m_new)
@@ -552,7 +544,13 @@ def nonlin_lstsq(*args,**kwargs):
       J = np.asarray(J,dtype=p['dtype'])
       d = res_func(p['m_k'])
       d = np.asarray(d,dtype=p['dtype'])
-      m_new = p['solver'](J,-d+J.dot(p['m_k']),
+      if Cdinv_is_diagonal:
+        JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+      else:
+        JtCdinv = J.transpose().dot(Cdinv)
+
+      m_new = p['solver'](JtCdinv.dot(J),
+                          JtCdinv.dot(-d+J.dot(p['m_k'])),
                           *p['solver_args'],
                           **p['solver_kwargs'])
       d_new = res_func(m_new)
@@ -575,8 +573,13 @@ def nonlin_lstsq(*args,**kwargs):
     if s == 'solution':
       output += p['m_k'],
 
-    if s == 'solution_uncertainty':
-      output += np.linalg.inv(J.transpose().dot(J)),
+    if s == 'solution_covariance':
+      if Cdinv_is_diagonal:
+        JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+      else:
+        JtCdinv = J.transpose().dot(Cdinv)
+
+      output += np.linalg.inv(JtCdinv.dot(J)),
 
     if s == 'jacobian':
       output += J,
@@ -586,8 +589,13 @@ def nonlin_lstsq(*args,**kwargs):
                             *p['system_args'],
                             **p['system_kwargs']),
 
-    if s == 'predicted_uncertainty':
-      soln_cov = np.linalg.inv(J.transpose().dot(J))
+    if s == 'predicted_covariance':
+      if Cdinv_is_diagonal:
+        JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+      else:
+        JtCdinv = J.transpose().dot(Cdinv)
+
+      soln_cov = np.linalg.inv(JtCdinv.dot(J))
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
