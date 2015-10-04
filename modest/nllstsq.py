@@ -87,6 +87,9 @@ def covariance_to_weight(C):
   W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True)
   return W
   
+def isdiagonal(A):
+  return np.all(np.diag(np.diag(A)) == A)
+
 ##------------------------------------------------------------------------------
 def _residual(system,
                data,
@@ -150,10 +153,8 @@ def _residual(system,
     '''
     jac = jacobian(model,*jacobian_args,**jacobian_kwargs)
     jac = jac[data_indices,:]
-    L_r = reg_matrix
-    L_l = lm_matrix
-    L_b = bayes_matrix
-    return np.vstack((jac,L_r,L_l,L_b))
+    out = np.vstack((jac,reg_matrix,lm_matrix,bayes_matrix))
+    return out
 
   return residual_function,residual_jacobian
 
@@ -458,13 +459,21 @@ def nonlin_lstsq(*args,**kwargs):
                                p['bayes_matrix'],
                                p['data_indices'])
 
+
   # covariance matrix which includes data cov, and prior cov
   data_cov = p['data_covariance']
   data_cov = data_cov[np.ix_(p['data_indices'],p['data_indices'])]
-  timing.tic()
-  data_cov_inv = np.linalg.inv(data_cov)
-  timing.toc()
-  prior_cov_inv = np.linalg.inv(p['prior_covariance'])
+  if isdiagonal(data_cov):
+    data_cov_inv = np.diag(1.0/np.diag(data_cov))
+  else:  
+    data_cov_inv = np.linalg.inv(data_cov)
+
+  prior_cov = p['prior_covariance']
+  if isdiagonal(prior_cov):
+    prior_cov_inv = np.diag(1.0/np.diag(prior_cov))
+  else:
+    prior_cov_inv = np.linalg.inv(prior_cov)
+
   reg_cov_inv = np.eye(len(p['regularization']))
   lm_cov_inv = np.eye(len(p['lm_matrix']))
 
@@ -474,7 +483,15 @@ def nonlin_lstsq(*args,**kwargs):
               lm_cov_inv,
               prior_cov_inv) 
 
-  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'])
+  Cdinv_is_diagonal = isdiagonal(Cdinv)
+  @funtime
+  def norm(x):
+    if Cdinv_is_diagonal:
+      return (x**2).dot(np.diag(Cdinv))
+    else:
+      return x.dot(Cdinv).dot(x)
+
+  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'],norm=norm)
 
   J = res_jac(p['m_k'])
   J = np.asarray(J,dtype=p['dtype'])
@@ -497,10 +514,10 @@ def nonlin_lstsq(*args,**kwargs):
     logger.debug('initial guess ' + message)
 
   while not ((status == 0) | (status == 3)):
-    # I want:
-    # m_new = p['solver'](J.transpose()Cdinv.dot(J)
-
-    JtCdinv = J.transpose().dot(Cdinv)
+    if Cdinv_is_diagonal:
+      JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+    else:
+      JtCdinv = J.transpose().dot(Cdinv)
 
     m_new = p['solver'](JtCdinv.dot(J),
                         JtCdinv.dot(-d+J.dot(p['m_k'])),
@@ -527,7 +544,11 @@ def nonlin_lstsq(*args,**kwargs):
       J = np.asarray(J,dtype=p['dtype'])
       d = res_func(p['m_k'])
       d = np.asarray(d,dtype=p['dtype'])
-      JtCdinv = J.transpose().dot(Cdinv)
+      if Cdinv_is_diagonal:
+        JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+      else:
+        JtCdinv = J.transpose().dot(Cdinv)
+
       m_new = p['solver'](JtCdinv.dot(J),
                           JtCdinv.dot(-d+J.dot(p['m_k'])),
                           *p['solver_args'],
@@ -553,7 +574,12 @@ def nonlin_lstsq(*args,**kwargs):
       output += p['m_k'],
 
     if s == 'solution_covariance':
-      output += np.linalg.inv(J.transpose().dot(Cdinv).dot(J)),
+      if Cdinv_is_diagonal:
+        JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+      else:
+        JtCdinv = J.transpose().dot(Cdinv)
+
+      output += np.linalg.inv(JtCdinv.dot(J)),
 
     if s == 'jacobian':
       output += J,
@@ -564,7 +590,12 @@ def nonlin_lstsq(*args,**kwargs):
                             **p['system_kwargs']),
 
     if s == 'predicted_covariance':
-      soln_cov = np.linalg.inv(J.transpose().dot(Cdinv).dot(J))
+      if Cdinv_is_diagonal:
+        JtCdinv = J.transpose()*np.diag(Cdinv)[None,:]
+      else:
+        JtCdinv = J.transpose().dot(Cdinv)
+
+      soln_cov = np.linalg.inv(JtCdinv.dot(J))
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
