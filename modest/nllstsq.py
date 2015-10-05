@@ -59,13 +59,21 @@ def jacobian_fd(m_o,
   return Jac
 
 ##------------------------------------------------------------------------------
+def isdiagonal(A):
+  return np.all(np.diag(np.diag(A)) == A)
+
+
 def covariance_to_weight(C):
   '''returns the weight matrix, W, which satisfies
 
        np.linalg.inv(C) = W.transpose().dot(W)                     (1)
 
-     This is done using Cholesky factorization of C to find A such
-     that
+     If C is a diagonal matrix, then this is simply done by returning
+     a diagonal matrix containing the inverse square root of the
+     diagonal components
+   
+     Otherwise, this is done by using Cholesky factorization of C to
+     find A such that
   
        C = A.dot(A.transpose()).                                   (2)
 
@@ -80,17 +88,21 @@ def covariance_to_weight(C):
      This function is SLOW
 
   '''
-  N = np.shape(C)[0]
-  A = np.linalg.cholesky(C)
-  W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True)
+  if isdiagonal(C):
+    W = np.diag(1.0/np.sqrt(np.diag(C)))
+
+  else:
+    N = np.shape(C)[0]
+    A = np.linalg.cholesky(C)
+    W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True)
+
   return W
   
-def isdiagonal(A):
-  return np.all(np.diag(np.diag(A)) == A)
 
 ##------------------------------------------------------------------------------
 def _residual(system,
                data,
+               data_weight,
                prior,
                system_args,
                system_kwargs,
@@ -102,6 +114,7 @@ def _residual(system,
                bayes_matrix,
                data_indices):
 
+  data_weight_is_diagonal = isdiagonal(data_weight)
   '''
   used for nonlin_lstsq
   '''  
@@ -113,6 +126,11 @@ def _residual(system,
     pred = system(model,*system_args,**system_kwargs)
     res = pred - data
     res = res[data_indices]
+    if data_weight_is_diagonal:
+      res = np.diag(data_weight)*res
+    else:
+      res = data_weight.dot(res)
+
     reg = reg_matrix.dot(model)    
     lm = lm_matrix.dot(0*model)
     bayes = bayes_matrix.dot(model - prior)
@@ -145,12 +163,18 @@ def _residual(system,
     '''
     jac = jacobian(model,*jacobian_args,**jacobian_kwargs)
     jac = jac[data_indices,:]
+    if data_weight_is_diagonal:
+      jac = np.diag(data_weight)[:,None]*jac
+    else:
+      jac = data_weight.dot(jac)
+
     out = np.vstack((jac,reg_matrix,lm_matrix,bayes_matrix))
     return out
 
   return residual_function,residual_jacobian
 
 ##------------------------------------------------------------------------------
+@funtime
 def _arg_parser(args,kwargs):
   '''parses and checks arguments for nonlin_lstsq()'''
   assert len(args) == 3, 'nonlin_lstsq takes exactly 3 positional arguments'
@@ -271,6 +295,14 @@ def _arg_parser(args,kwargs):
 
   if p['output'] is None:
     p['output'] = ['solution'] 
+
+  idx = np.ix_(p['data_indices'],p['data_indices'])
+  p['data_weight'] = covariance_to_weight(p.pop('data_covariance')[idx])
+  p['prior_weight'] = covariance_to_weight(p.pop('prior_covariance'))
+  if isdiagonal(p['prior_weight']):
+    p['bayes_matrix'] = np.diag(p.pop('prior_weight'))[:,None]*p['bayes_matrix']
+  else:
+    p['bayes_matrix'] = p.pop('prior_weight').dot(p['bayes_matrix'])
 
   return p
 
@@ -436,9 +468,9 @@ def nonlin_lstsq(*args,**kwargs):
 
   '''
   p = _arg_parser(args,kwargs)
- 
   res_func,res_jac = _residual(p['system'],
                                p['data'],
+                               p['data_weight'],
                                p['prior'],
                                p['system_args'],
                                p['system_kwargs'],
@@ -450,57 +482,7 @@ def nonlin_lstsq(*args,**kwargs):
                                p['bayes_matrix'],
                                p['data_indices'])
 
-
-  # covariance matrix which includes data cov, and prior cov
-  data_cov = p['data_covariance']
-  data_cov = data_cov[np.ix_(p['data_indices'],p['data_indices'])]
-  if isdiagonal(data_cov):
-    data_cov_is_diagonal = True
-  else:  
-    data_cov_is_diagonal = False
-
-  prior_cov = p['prior_covariance']
-  if isdiagonal(prior_cov):
-    prior_cov_is_diagonal = True
-  else:
-    prior_cov_is_diagonal = False
-
-  if data_cov_is_diagonal & prior_cov_is_diagonal:
-    Cdinv_is_diagonal = True
-    Cdinv = np.hstack((1.0/np.diag(data_cov),
-                       np.ones(len(p['regularization'])),  
-                       np.ones(len(p['lm_matrix'])),  
-                       1.0/np.diag(prior_cov)))
-  else:
-    Cdinv_is_diagonal = False
-    if data_cov_is_diagonal:
-      data_cov_inv = np.diag(1.0/np.diag(data_cov))
-    else:
-      data_cov_inv = np.linalg.inv(data_cov)
-
-    if prior_cov_is_diagonal:
-      prior_cov_inv = np.diag(1.0/np.diag(prior_cov))
-    else:
-      prior_cov_inv = np.linalg.inv(prior_cov)
-
-    reg_cov_inv = np.eye(len(p['regularization']))
-    lm_cov_inv = np.eye(len(p['lm_matrix']))
-    Cdinv = scipy.linalg.block_diag(
-              data_cov_inv,
-              reg_cov_inv,
-              lm_cov_inv,
-              prior_cov_inv) 
-
-  # if data covariance and prior covariance are both diagonal then 
-  # do not bother constructing a dense covariance matrix, only use
-  # diagonals
-  def norm(x):
-    if Cdinv_is_diagonal:
-      return (x**2).dot(Cdinv)
-    else:
-      return x.dot(Cdinv).dot(x)
-
-  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'],norm=norm)
+  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'])
 
   J = res_jac(p['m_k'])
   J = np.asarray(J,dtype=p['dtype'])
@@ -523,20 +505,8 @@ def nonlin_lstsq(*args,**kwargs):
     logger.debug('initial guess ' + message)
 
   while not ((status == 0) | (status == 3)):
-
-    # The next lines solve 
-    #   Jt*Cd^-1*J*m = Jt*Cd^-1(-d + J*m_o)
-    # for m.  I premultiply by Jt*Cd^-1 because the number of model 
-    # parameters is often larger than the number of observations and
-    # so I am decreasing the size of the problem being solved and 
-    # reducing run time 
-    if Cdinv_is_diagonal:
-      JtCdinv = J.transpose()*Cdinv[None,:]
-    else:
-      JtCdinv = J.transpose().dot(Cdinv)
-
-    m_new = p['solver'](JtCdinv.dot(J),
-                        JtCdinv.dot(-d+J.dot(p['m_k'])),
+    m_new = p['solver'](J,
+                        -d+J.dot(p['m_k']),
                         *p['solver_args'],
                         **p['solver_kwargs'])
     d_new = res_func(m_new)
@@ -560,13 +530,8 @@ def nonlin_lstsq(*args,**kwargs):
       J = np.asarray(J,dtype=p['dtype'])
       d = res_func(p['m_k'])
       d = np.asarray(d,dtype=p['dtype'])
-      if Cdinv_is_diagonal:
-        JtCdinv = J.transpose()*Cdinv[None,:]
-      else:
-        JtCdinv = J.transpose().dot(Cdinv)
-
-      m_new = p['solver'](JtCdinv.dot(J),
-                          JtCdinv.dot(-d+J.dot(p['m_k'])),
+      m_new = p['solver'](J,
+                          -d+J.dot(p['m_k']),
                           *p['solver_args'],
                           **p['solver_kwargs'])
       d_new = res_func(m_new)
@@ -590,12 +555,7 @@ def nonlin_lstsq(*args,**kwargs):
       output += p['m_k'],
 
     if s == 'solution_covariance':
-      if Cdinv_is_diagonal:
-        JtCdinv = J.transpose()*Cdinv[None,:]
-      else:
-        JtCdinv = J.transpose().dot(Cdinv)
-
-      output += np.linalg.inv(JtCdinv.dot(J)),
+      output += np.linalg.inv(J.transpose().dot(J)),
 
     if s == 'jacobian':
       output += J,
@@ -606,12 +566,7 @@ def nonlin_lstsq(*args,**kwargs):
                             **p['system_kwargs']),
 
     if s == 'predicted_covariance':
-      if Cdinv_is_diagonal:
-        JtCdinv = J.transpose()*Cdinv[None,:]
-      else:
-        JtCdinv = J.transpose().dot(Cdinv)
-
-      soln_cov = np.linalg.inv(JtCdinv.dot(J))
+      soln_cov = np.linalg.inv(J.transpose().dot(J))
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
