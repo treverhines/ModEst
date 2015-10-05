@@ -62,7 +62,6 @@ def jacobian_fd(m_o,
 def isdiagonal(A):
   return np.all(np.diag(np.diag(A)) == A)
 
-
 def covariance_to_weight(C):
   '''returns the weight matrix, W, which satisfies
 
@@ -178,7 +177,6 @@ def _residual(system,
 def _arg_parser(args,kwargs):
   '''parses and checks arguments for nonlin_lstsq()'''
   assert len(args) == 3, 'nonlin_lstsq takes exactly 3 positional arguments'
-
   p = {'solver':solvers.lstsq,
        'LM_damping':True,
        'LM_param':1e-4,
@@ -216,6 +214,7 @@ def _arg_parser(args,kwargs):
 
   p['m_k'] = np.asarray(p['m_k'])
   p['prior'] = np.copy(p['m_k'])
+
 
   # assert that only one type of prior uncertainty is given      
   if p['data_covariance'] is not None:
@@ -274,8 +273,8 @@ def _arg_parser(args,kwargs):
     p['regularization'] = np.zeros((0,len(p['m_k'])))
 
   # if regularization is given as a sparse matrix and unsparsify it
-  if hasattr(p['regularization'],'todense'):
-    p['regularization'] = np.array(p['regularization'].todense())
+  #if hasattr(p['regularization'],'todense'):
+  #  p['regularization'] = np.array(p['regularization'].todense())
  
   assert len(np.shape(p['regularization'])) == 2, (
     'regularization must be 2-D array or length 2 array')

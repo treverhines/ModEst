@@ -35,7 +35,7 @@ def _arg_checker(fin):
   fout.__name__ = fin.__name__
   return fout
 
-
+@funtime
 @_arg_checker
 def lstsq(G,d,*args,**kwargs):
   '''                                     
@@ -44,7 +44,7 @@ def lstsq(G,d,*args,**kwargs):
   out = scipy.linalg.lstsq(G,d,*args,**kwargs)[0]
   return out
 
-
+@funtime
 @_arg_checker
 def nnls(G,d,*args,**kwargs):
   '''               
@@ -53,7 +53,7 @@ def nnls(G,d,*args,**kwargs):
   out = scipy.optimize.nnls(G,d,*args,**kwargs)[0]
   return out
 
-
+@funtime
 @_arg_checker
 def bvls(G,d,lower_lim,upper_lim):
   '''                                                                                         
@@ -109,7 +109,7 @@ def bvls(G,d,lower_lim,upper_lim):
 
   return soln
 
-
+@funtime
 @_arg_checker
 def cgls(G,d,m_o=None,maxitr=2000,rtol=1e-16,atol=1e-16):
   '''
@@ -150,7 +150,7 @@ def cgls(G,d,m_o=None,maxitr=2000,rtol=1e-16,atol=1e-16):
 
   return m_o
 
-
+@funtime
 @_arg_checker
 def cg(G,d,*args,**kwargs):
   '''
