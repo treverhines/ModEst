@@ -59,6 +59,9 @@ def jacobian_fd(m_o,
   return Jac
 
 ##------------------------------------------------------------------------------
+def is1d(A):
+  return (len(np.shape(A)) == 1)
+
 def isdiagonal(A):
   return np.all(np.diag(np.diag(A)) == A)
 
@@ -87,8 +90,11 @@ def covariance_to_weight(C):
      This function is SLOW
 
   '''
-  if isdiagonal(C):
-    W = np.diag(1.0/np.sqrt(np.diag(C)))
+  if is1d(C):
+    W = 1.0/np.sqrt(C)
+
+  elif isdiagonal(C):
+    W = 1.0/np.sqrt(np.diag(C))
 
   else:
     N = np.shape(C)[0]
@@ -97,7 +103,6 @@ def covariance_to_weight(C):
 
   return W
   
-
 ##------------------------------------------------------------------------------
 def _residual(system,
                data,
@@ -112,8 +117,6 @@ def _residual(system,
                lm_matrix,
                bayes_matrix,
                data_indices):
-
-  data_weight_is_diagonal = isdiagonal(data_weight)
   '''
   used for nonlin_lstsq
   '''  
@@ -124,12 +127,12 @@ def _residual(system,
     '''
     pred = system(model,*system_args,**system_kwargs)
     res = pred - data
-    res = res[data_indices]
-    if data_weight_is_diagonal:
-      res = np.diag(data_weight)*res
+    if is1d(data_weight):
+      res = data_weight*res
     else:
       res = data_weight.dot(res)
 
+    res = res[data_indices]
     reg = reg_matrix.dot(model)    
     lm = lm_matrix.dot(0*model)
     bayes = bayes_matrix.dot(model - prior)
@@ -161,12 +164,12 @@ def _residual(system,
 
     '''
     jac = jacobian(model,*jacobian_args,**jacobian_kwargs)
-    jac = jac[data_indices,:]
-    if data_weight_is_diagonal:
-      jac = np.diag(data_weight)[:,None]*jac
+    if is1d(data_weight):
+      jac = data_weight[:,None]*jac
     else:
       jac = data_weight.dot(jac)
 
+    jac = jac[data_indices,:]
     out = np.vstack((jac,reg_matrix,lm_matrix,bayes_matrix))
     return out
 
@@ -221,7 +224,7 @@ def _arg_parser(args,kwargs):
     p['data_covariance'] = np.asarray(p['data_covariance'])
 
   else:
-    p['data_covariance'] = np.eye(len(p['data']))
+    p['data_covariance'] = np.ones(len(p['data']))
 
   if p['prior_covariance'] is not None:
     p['prior_covariance'] = np.asarray(p['prior_covariance'])
@@ -295,11 +298,10 @@ def _arg_parser(args,kwargs):
   if p['output'] is None:
     p['output'] = ['solution'] 
 
-  idx = np.ix_(p['data_indices'],p['data_indices'])
-  p['data_weight'] = covariance_to_weight(p.pop('data_covariance')[idx])
+  p['data_weight'] = covariance_to_weight(p.pop('data_covariance'))
   p['prior_weight'] = covariance_to_weight(p.pop('prior_covariance'))
-  if isdiagonal(p['prior_weight']):
-    p['bayes_matrix'] = np.diag(p.pop('prior_weight'))[:,None]*p['bayes_matrix']
+  if is1d(p['prior_weight']):
+    p['bayes_matrix'] = p.pop('prior_weight')[:,None]*p['bayes_matrix']
   else:
     p['bayes_matrix'] = p.pop('prior_weight').dot(p['bayes_matrix'])
 
@@ -517,14 +519,14 @@ def nonlin_lstsq(*args,**kwargs):
       logger.debug(message)
 
     if (status == 1) and p['LM_damping']:
-      logger.debug('decreasing LM parameter to %s' % p['LM_param'])
       p['lm_matrix'] /= p['LM_factor']
       p['LM_param'] /= p['LM_factor']
+      logger.debug('decreasing LM parameter to %s' % p['LM_param'])
 
     while ((status == 2) | (status == 3)) and p['LM_damping']:
-      logger.debug('increasing LM parameter to %s' % p['LM_param'])
       p['lm_matrix'] *= p['LM_factor']
       p['LM_param'] *= p['LM_factor']
+      logger.debug('increasing LM parameter to %s' % p['LM_param'])
       J = res_jac(p['m_k'])
       J = np.asarray(J,dtype=p['dtype'])
       d = res_func(p['m_k'])

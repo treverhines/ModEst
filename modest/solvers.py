@@ -42,6 +42,7 @@ def lstsq(G,d,*args,**kwargs):
   wrapper from scipy.linalg.lstsq  
   '''
   out = scipy.linalg.lstsq(G,d,*args,**kwargs)[0]
+  #out = np.linalg.lstsq(G,d,*args,**kwargs)[0]
   return out
 
 @funtime
