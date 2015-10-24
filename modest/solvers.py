@@ -84,7 +84,7 @@ def bvls(G,d,lower_lim,upper_lim):
     >>>d = G.dot(m)                        
     >>>lower_bounds = np.array([0.0,0.0])           
     >>>upper_bounds = np.array([1.5,1.5])           
-    >>>output = bvls.bvls(G,d,lower_bounds,upper_bounds) 
+    >>>output = bvls(G,d,lower_bounds,upper_bounds) 
     >>>m_est = output[0]               
   '''
   bounds = np.array([lower_lim,upper_lim])
