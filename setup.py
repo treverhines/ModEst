@@ -2,7 +2,7 @@
 def configuration(parent_package='',top_path=None):
     from numpy.distutils.misc_util import Configuration
     config = Configuration(None, parent_package, top_path)
-    config.add_extension('_bvls',sources=['modest/_bvls/_bvls.pyf','modest/_bvls/_bvls.f90'])
+    config.add_extension('modest._bvls._bvls',sources=['modest/_bvls/_bvls.pyf','modest/_bvls/_bvls.f90'])
     return config
 
 if __name__ == '__main__':
