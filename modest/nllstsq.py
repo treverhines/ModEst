@@ -10,6 +10,7 @@ import scipy.sparse
 
 logger = logging.getLogger(__name__)
 
+##------------------------------------------------------------------------------
 class ErrorTracker:
   def __init__(self):
     self.error_best = np.inf
@@ -534,7 +535,8 @@ def nonlin_lstsq(*args,**kwargs):
                         *p['solver_args'],
                         **p['solver_kwargs'])
     d_new = res_func(m_new)
-    conv.set(np.linalg.norm(d_new))
+    err = np.linalg.norm(d_new)
+    conv.set(err)
     counter += 1
     if p['LM_damping']:
       if (conv.error_last == conv.error_best):
@@ -548,7 +550,6 @@ def nonlin_lstsq(*args,**kwargs):
             break 
 
           if counter >= p['maxitr']:
-            logger.debug('finished due to maxitr: error %s' % conv.error_last)
             break
 
           p['lm_matrix'] *= p['LM_factor']
@@ -563,7 +564,8 @@ def nonlin_lstsq(*args,**kwargs):
                               *p['solver_args'],
                               **p['solver_kwargs'])
           d_new = res_func(m_new)
-          conv.set(np.linalg.norm(d_new))
+          err = np.linalg.norm(d_new)
+          conv.set(err)
           counter += 1
   
     p['m_k'] = m_new
