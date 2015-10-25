@@ -2,6 +2,8 @@
 import unittest
 import modest
 import numpy as np
+import logging
+logging.basicConfig(level=logging.DEBUG)
 tol = 1e-3
 # make sure that nonlin_lstsq works for a linear case
 

@@ -84,5 +84,21 @@ class Converger:
     self.error = self.norm(residual)
     return
 
+class ErrorTracker:
+  def __init__(self):
+    self.error_best = np.inf
+    self.error_last = np.inf
+    self.error_relative = np.inf
+
+
+  def set(self,error_new):
+    if error_new < self.error_best:
+      self.error_best = error_new
+
+    self.error_relative = error_new - self.error_last
+    self.error_last = self.error_new 
+
+
+
     
 

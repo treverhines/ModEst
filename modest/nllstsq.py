@@ -3,13 +3,26 @@ import numpy as np
 import logging
 import solvers
 import timing
-from converger import Converger
 from tikhonov import Perturb
 from tikhonov import tikhonov_matrix
 from timing import funtime
 import scipy.sparse
 
 logger = logging.getLogger(__name__)
+
+class ErrorTracker:
+  def __init__(self):
+    self.error_best = np.inf
+    self.error_last = np.inf
+    self.error_relative = np.inf
+
+
+  def set(self,error_new):
+    if error_new < self.error_best:
+      self.error_best = error_new
+
+    self.error_relative = error_new - self.error_last
+    self.error_last = error_new
 
 ##------------------------------------------------------------------------------
 def jacobian_fd(m_o,
@@ -483,7 +496,7 @@ def nonlin_lstsq(*args,**kwargs):
                                p['bayes_matrix'],
                                p['data_indices'])
 
-  conv = Converger(atol=p['atol'],rtol=p['rtol'],maxitr=p['maxitr'])
+  conv = ErrorTracker()
 
   J = res_jac(p['m_k'])
   J = np.asarray(J,dtype=p['dtype'])
@@ -497,54 +510,63 @@ def nonlin_lstsq(*args,**kwargs):
                                   'predicted data vector.  Try using a different '
                                   'initial guess for the model parameters')
 
-  status,message = conv.check(d)
-  conv.set_residual(d)
-  if status == 0:
-    logger.info('initial guess ' + message)
+  conv.set(np.linalg.norm(d))
+  counter = 0 
+  while True:
+    if not np.isfinite(conv.error_last):
+      logger.debug('exited due to infinite error')
+      break
 
-  else:
-    logger.debug('initial guess ' + message)
+    if conv.error_last < p['atol']:
+      logger.debug('converged due to atol: error %s' % conv.error_last)
+      break
 
-  while not ((status == 0) | (status == 3)):
+    if np.abs(conv.error_relative) < p['rtol']:
+      logger.debug('converged due to rtol: error %s' % conv.error_last)
+      break
+
+    if counter >= p['maxitr']:
+      logger.debug('finished due to maxitr: error %s' % conv.error_last)
+      break
+
     m_new = p['solver'](J,
                         -d+J.dot(p['m_k']),
                         *p['solver_args'],
                         **p['solver_kwargs'])
     d_new = res_func(m_new)
-    status,message = conv.check(d_new)
-    if status == 0:
-      logger.info(message)
+    conv.set(np.linalg.norm(d_new))
+    counter += 1
+    if p['LM_damping']:
+      if (conv.error_last == conv.error_best):
+        p['lm_matrix'] /= p['LM_factor']
+        p['LM_param'] /= p['LM_factor']
+        logger.debug('decreasing LM parameter to %s' % p['LM_param'])
 
-    else:
-      logger.debug(message)
-
-    if (status == 1) and p['LM_damping']:
-      p['lm_matrix'] /= p['LM_factor']
-      p['LM_param'] /= p['LM_factor']
-      logger.debug('decreasing LM parameter to %s' % p['LM_param'])
-
-    while ((status == 2) | (status == 3)) and p['LM_damping']:
-      p['lm_matrix'] *= p['LM_factor']
-      p['LM_param'] *= p['LM_factor']
-      logger.debug('increasing LM parameter to %s' % p['LM_param'])
-      J = res_jac(p['m_k'])
-      J = np.asarray(J,dtype=p['dtype'])
-      d = res_func(p['m_k'])
-      d = np.asarray(d,dtype=p['dtype'])
-      m_new = p['solver'](J,
-                          -d+J.dot(p['m_k']),
-                          *p['solver_args'],
-                          **p['solver_kwargs'])
-      d_new = res_func(m_new)
-      status,message = conv.check(d_new)
-      if status == 0:
-        logger.info(message)
       else:
-        logger.debug(message)
+        while True:
+          if (conv.error_last == conv.error_best):
+            break 
+
+          if counter >= p['maxitr']:
+            logger.debug('finished due to maxitr: error %s' % conv.error_last)
+            break
+
+          p['lm_matrix'] *= p['LM_factor']
+          p['LM_param'] *= p['LM_factor']
+          logger.debug('increasing LM parameter to %s' % p['LM_param'])
+          J = res_jac(p['m_k'])
+          J = np.asarray(J,dtype=p['dtype'])
+          d = res_func(p['m_k'])
+          d = np.asarray(d,dtype=p['dtype'])
+          m_new = p['solver'](J,
+                              -d+J.dot(p['m_k']),
+                              *p['solver_args'],
+                              **p['solver_kwargs'])
+          d_new = res_func(m_new)
+          conv.set(np.linalg.norm(d_new))
+          counter += 1
   
     p['m_k'] = m_new
-    conv.set_residual(d_new)
-
     J = res_jac(p['m_k'])
     J = np.asarray(J,dtype=p['dtype'])
     d = res_func(p['m_k'])
