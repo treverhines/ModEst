@@ -11,21 +11,6 @@ import scipy.sparse
 logger = logging.getLogger(__name__)
 
 ##------------------------------------------------------------------------------
-class ErrorTracker:
-  def __init__(self):
-    self.error_best = np.inf
-    self.error_last = np.inf
-    self.error_relative = np.inf
-
-
-  def set(self,error_new):
-    if error_new < self.error_best:
-      self.error_best = error_new
-
-    self.error_relative = error_new - self.error_last
-    self.error_last = error_new
-
-##------------------------------------------------------------------------------
 def jacobian_fd(m_o,
                 system,
                 system_args=None,
@@ -497,8 +482,6 @@ def nonlin_lstsq(*args,**kwargs):
                                p['bayes_matrix'],
                                p['data_indices'])
 
-  conv = ErrorTracker()
-
   J = res_jac(p['m_k'])
   J = np.asarray(J,dtype=p['dtype'])
   d = res_func(p['m_k'])
@@ -511,23 +494,25 @@ def nonlin_lstsq(*args,**kwargs):
                                   'predicted data vector.  Try using a different '
                                   'initial guess for the model parameters')
 
-  conv.set(np.linalg.norm(d))
+  err_last = np.inf
+  err_curr = np.linalg.norm(d)
   counter = 0 
+  logger.info('error at iteration %s: %s' % (counter,err_curr))    
   while True:
-    if not np.isfinite(conv.error_last):
-      logger.debug('exited due to infinite error')
+    if not np.isfinite(err_curr):
+      logger.info('exited due to infinite error')
+      break 
+
+    if err_curr < p['atol']:
+      logger.info('converged to atol: error %s' % err_curr)
       break
 
-    if conv.error_last < p['atol']:
-      logger.debug('converged due to atol: error %s' % conv.error_last)
-      break
-
-    if np.abs(conv.error_relative) < p['rtol']:
-      logger.debug('converged due to rtol: error %s' % conv.error_last)
+    if np.abs(err_last - err_curr) < p['rtol']:
+      logger.info('converged to rtol: error %s' % err_curr)
       break
 
     if counter >= p['maxitr']:
-      logger.debug('finished due to maxitr: error %s' % conv.error_last)
+      logger.info('finished due to maxitr: error %s' % err_curr)
       break
 
     m_new = p['solver'](J,
@@ -535,26 +520,31 @@ def nonlin_lstsq(*args,**kwargs):
                         *p['solver_args'],
                         **p['solver_kwargs'])
     d_new = res_func(m_new)
-    err = np.linalg.norm(d_new)
-    conv.set(err)
+    err_last = err_curr
+    err_curr = np.linalg.norm(d_new)
     counter += 1
+
+    logger.info('error at iteration %s: %s' % (counter,err_curr))    
     if p['LM_damping']:
-      if (conv.error_last == conv.error_best):
+      if err_curr < err_last:
         p['lm_matrix'] /= p['LM_factor']
         p['LM_param'] /= p['LM_factor']
-        logger.debug('decreasing LM parameter to %s' % p['LM_param'])
+        logger.info('decreasing LM parameter to %s' % p['LM_param'])
 
       else:
         while True:
-          if (conv.error_last == conv.error_best):
+          if err_curr < err_last:
             break 
+
+          if np.abs(err_last - err_curr) < p['rtol']:
+            break
 
           if counter >= p['maxitr']:
             break
 
           p['lm_matrix'] *= p['LM_factor']
           p['LM_param'] *= p['LM_factor']
-          logger.debug('increasing LM parameter to %s' % p['LM_param'])
+          logger.info('increasing LM parameter to %s' % p['LM_param'])
           J = res_jac(p['m_k'])
           J = np.asarray(J,dtype=p['dtype'])
           d = res_func(p['m_k'])
@@ -564,10 +554,10 @@ def nonlin_lstsq(*args,**kwargs):
                               *p['solver_args'],
                               **p['solver_kwargs'])
           d_new = res_func(m_new)
-          err = np.linalg.norm(d_new)
-          conv.set(err)
+          err_curr = np.linalg.norm(d_new)
           counter += 1
-  
+          logger.info('error at iteration %s: %s' % (counter,err_curr))    
+
     p['m_k'] = m_new
     J = res_jac(p['m_k'])
     J = np.asarray(J,dtype=p['dtype'])
