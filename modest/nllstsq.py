@@ -7,6 +7,7 @@ from tikhonov import Perturb
 from tikhonov import tikhonov_matrix
 from timing import funtime
 import scipy.sparse
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,13 @@ def covariance_to_weight(C):
 
   else:
     N = np.shape(C)[0]
-    A = np.linalg.cholesky(C)
-    W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True)
+    try:
+      A = scipy.linalg.cholesky(C,lower=True)
+    except np.linalg.linalg.LinAlgError:
+      plt.plot(np.diag(C))
+      plt.show()
+
+    W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True,overwrite_b=True)
 
   return W
   
@@ -570,7 +576,7 @@ def nonlin_lstsq(*args,**kwargs):
       output += p['m_k'],
 
     if s == 'solution_covariance':
-      output += np.linalg.inv(J.transpose().dot(J)),
+      output += scipy.linalg.inv(J.transpose().dot(J),overwrite_a=True),
 
     if s == 'jacobian':
       output += J,
@@ -581,17 +587,17 @@ def nonlin_lstsq(*args,**kwargs):
                             **p['system_kwargs']),
 
     if s == 'predicted_covariance':
-      soln_cov = np.linalg.inv(J.transpose().dot(J))
+      soln_cov = scipy.linalg.inv(J.transpose().dot(J),overwrite_a=True)
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
       output += obs_jac.dot(soln_cov).dot(obs_jac.transpose()),
 
     if s == 'misfit':
-      output += conv.error,
+      output += err_curr,
 
     if s == 'iterations':
-      output += conv.itr,
+      output += counter,
 
   if len(output) == 1:
     output = output[0]
