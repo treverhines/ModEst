@@ -98,11 +98,7 @@ def covariance_to_weight(C):
 
   else:
     N = np.shape(C)[0]
-    try:
-      A = scipy.linalg.cholesky(C,lower=True)
-    except np.linalg.linalg.LinAlgError:
-      plt.plot(np.diag(C))
-      plt.show()
+    A = scipy.linalg.cholesky(C,lower=True)
 
     W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True,overwrite_b=True)
 
@@ -552,9 +548,7 @@ def nonlin_lstsq(*args,**kwargs):
           p['LM_param'] *= p['LM_factor']
           logger.info('increasing LM parameter to %s' % p['LM_param'])
           J = res_jac(p['m_k'])
-          J = np.asarray(J,dtype=p['dtype'])
           d = res_func(p['m_k'])
-          d = np.asarray(d,dtype=p['dtype'])
           m_new = p['solver'](J,
                               -d+J.dot(p['m_k']),
                               *p['solver_args'],
@@ -565,10 +559,8 @@ def nonlin_lstsq(*args,**kwargs):
           logger.info('error at iteration %s: %s' % (counter,err_curr))    
 
     p['m_k'] = m_new
+    d = d_new
     J = res_jac(p['m_k'])
-    J = np.asarray(J,dtype=p['dtype'])
-    d = res_func(p['m_k'])
-    d = np.asarray(d,dtype=p['dtype'])
 
   output = ()
   for s in p['output']:
@@ -576,7 +568,7 @@ def nonlin_lstsq(*args,**kwargs):
       output += p['m_k'],
 
     if s == 'solution_covariance':
-      output += scipy.linalg.inv(J.transpose().dot(J),overwrite_a=True),
+      output += scipy.linalg.pinv(J.transpose().dot(J)),
 
     if s == 'jacobian':
       output += J,
@@ -587,7 +579,7 @@ def nonlin_lstsq(*args,**kwargs):
                             **p['system_kwargs']),
 
     if s == 'predicted_covariance':
-      soln_cov = scipy.linalg.inv(J.transpose().dot(J),overwrite_a=True)
+      soln_cov = scipy.linalg.pinv(J.transpose().dot(J))
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
