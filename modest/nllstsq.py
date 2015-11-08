@@ -496,7 +496,7 @@ def nonlin_lstsq(*args,**kwargs):
   err_last = np.inf
   err_curr = np.linalg.norm(d)
   counter = 0 
-  logger.info('error at iteration %s: %s' % (counter,err_curr))    
+  logger.debug('error at iteration %s: %s' % (counter,err_curr))    
   while True:
     if not np.isfinite(err_curr):
       logger.info('exited due to infinite error')
@@ -522,12 +522,12 @@ def nonlin_lstsq(*args,**kwargs):
     err_curr = np.linalg.norm(res_func(m_new))
     counter += 1
 
-    logger.info('error at iteration %s: %s' % (counter,err_curr))    
+    logger.debug('error at iteration %s: %s' % (counter,err_curr))    
     if p['LM_damping']:
       if err_curr < err_last:
         p['lm_matrix'] /= p['LM_factor']
         p['LM_param'] /= p['LM_factor']
-        logger.info('decreasing LM parameter to %s' % p['LM_param'])
+        logger.debug('decreasing LM parameter to %s' % p['LM_param'])
 
       else:
         while True:
@@ -542,7 +542,7 @@ def nonlin_lstsq(*args,**kwargs):
 
           p['LM_param'] *= p['LM_factor']
           p['lm_matrix'] *= p['LM_factor']
-          logger.info('increasing LM parameter to %s' % p['LM_param'])
+          logger.debug('increasing LM parameter to %s' % p['LM_param'])
           J[:p['lm_matrix'].shape[0],:] *= p['LM_factor']
           m_new = p['solver'](J,
                               -d+J.dot(p['m_k']),
@@ -550,7 +550,7 @@ def nonlin_lstsq(*args,**kwargs):
                               **p['solver_kwargs'])
           err_curr = np.linalg.norm(res_func(m_new))
           counter += 1
-          logger.info('error at iteration %s: %s' % (counter,err_curr))    
+          logger.debug('error at iteration %s: %s' % (counter,err_curr))    
 
     p['m_k'] = m_new
     d = res_func(p['m_k'])
