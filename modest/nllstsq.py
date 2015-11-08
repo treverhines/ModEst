@@ -135,9 +135,9 @@ def _residual(system,
 
     res = res[data_indices]
     reg = reg_matrix.dot(model)    
-    lm = lm_matrix.dot(0*model)
     bayes = bayes_matrix.dot(model - prior)
-    return np.hstack((res,reg,lm,bayes))
+    lm = lm_matrix.dot(0*model)
+    return np.hstack((lm,res,reg,bayes))
 
   def residual_jacobian(model):
     '''
@@ -171,7 +171,7 @@ def _residual(system,
       jac = data_weight.dot(jac)
 
     jac = jac[data_indices,:]
-    jac = np.vstack((jac,reg_matrix,lm_matrix,bayes_matrix))
+    jac = np.vstack((lm_matrix,jac,reg_matrix,bayes_matrix))
     return jac
 
   return residual_function,residual_jacobian
@@ -483,11 +483,8 @@ def nonlin_lstsq(*args,**kwargs):
                                p['lm_matrix'],
                                p['bayes_matrix'],
                                p['data_indices'])
-
   J = res_jac(p['m_k'])
-  J = np.asarray(J,dtype=p['dtype'])
   d = res_func(p['m_k'])
-  d = np.asarray(d,dtype=p['dtype'])
 
   assert np.all(np.isfinite(J)), ('non-finite value encountered in the initial '
                                   'Jacobian matrix.  Try using a different '
@@ -521,9 +518,8 @@ def nonlin_lstsq(*args,**kwargs):
                         -d+J.dot(p['m_k']),
                         *p['solver_args'],
                         **p['solver_kwargs'])
-    d_new = res_func(m_new)
     err_last = err_curr
-    err_curr = np.linalg.norm(d_new)
+    err_curr = np.linalg.norm(res_func(m_new))
     counter += 1
 
     logger.info('error at iteration %s: %s' % (counter,err_curr))    
@@ -544,22 +540,20 @@ def nonlin_lstsq(*args,**kwargs):
           if counter >= p['maxitr']:
             break
 
-          p['lm_matrix'] *= p['LM_factor']
           p['LM_param'] *= p['LM_factor']
+          p['lm_matrix'] *= p['LM_factor']
           logger.info('increasing LM parameter to %s' % p['LM_param'])
-          J = res_jac(p['m_k'])
-          d = res_func(p['m_k'])
+          J[:p['lm_matrix'].shape[0],:] *= p['LM_factor']
           m_new = p['solver'](J,
                               -d+J.dot(p['m_k']),
                               *p['solver_args'],
                               **p['solver_kwargs'])
-          d_new = res_func(m_new)
-          err_curr = np.linalg.norm(d_new)
+          err_curr = np.linalg.norm(res_func(m_new))
           counter += 1
           logger.info('error at iteration %s: %s' % (counter,err_curr))    
 
     p['m_k'] = m_new
-    d = d_new
+    d = res_func(p['m_k'])
     J = res_jac(p['m_k'])
 
   output = ()
