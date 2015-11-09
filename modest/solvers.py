@@ -7,11 +7,10 @@ import numpy as np
 import scipy.optimize
 import scipy.sparse.linalg
 import scipy.linalg
-import pymls
-import _bvls
-from converger import Converger
+import modest._bvls as _bvls
+from modest.converger import Converger
 import logging
-from timing import funtime
+from modest.timing import funtime
 logger = logging.getLogger(__name__)
 
 def _arg_checker(fin):

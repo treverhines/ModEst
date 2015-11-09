@@ -48,17 +48,17 @@ class Timer:
       itr = 0
       while True:
         n = 'process %s' % itr
-        if not self.time_dict.has_key(n):
+        if n in self.time_dict:
           ID = n
           break
 
         itr += 1
 
-    if self.time_dict.has_key(ID):
+    if ID in self.time_dict:
       logger.warning('%s is already being timed' % ID)
       return 
 
-    if not self.actime_dict.has_key(ID):
+    if not ID in self.actime_dict:
       self.actime_dict[ID] = 0.0
 
     self.time_dict[ID] = timemod.time()

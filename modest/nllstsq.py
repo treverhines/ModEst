@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 import numpy as np
 import logging
-import solvers
-import timing
-from tikhonov import Perturb
-from tikhonov import tikhonov_matrix
-from timing import funtime
+import modest.solvers as solvers
+import modest.timing as timing
+from modest.tikhonov import Perturb
+from modest.tikhonov import tikhonov_matrix
+from modest.timing import funtime
 import scipy.sparse
 import matplotlib.pyplot as plt
 
@@ -202,7 +202,7 @@ def _arg_parser(args,kwargs):
        'dtype':None,
        'output':None}
 
-  for key,val in kwargs.iteritems():
+  for key,val in kwargs.items():
     assert key in p.keys(), (
       'invalid keyword argument for nonlin_lstsq(): %s' % key)
 

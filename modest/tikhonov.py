@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import numpy as np
 import logging
-from timing import funtime
-from misc import list_flatten
+from modest.timing import funtime
+from modest.misc import list_flatten
 logger = logging.getLogger(__name__)
 
 
@@ -10,7 +10,7 @@ def remove_zero_rows(M):
   '''
   used in tikhonov_matrix
   '''
-  return np.array(filter(np.any,M))
+  return np.array([i for i in M if np.any(i)])
 
 
 def linear_to_array_index(val,shape,wrap=False):
@@ -42,7 +42,7 @@ class Perturb:
   def __iter__(self):
     return self
 
-  def next(self):
+  def __next__(self):
     if self.itr == self.N:
       raise StopIteration
     else:
@@ -78,7 +78,7 @@ class IndexEnumerate:
   def __iter__(self):
     return self
 
-  def next(self):
+  def __next__(self):
     if self.itr == self.size:
       raise StopIteration
     else:
@@ -97,8 +97,8 @@ class Neighbors(IndexEnumerate):
     assert search in ['all','forward','backward']
     self.search = search
 
-  def next(self):
-    idx,val = IndexEnumerate.next(self)
+  def __next__(self):
+    idx,val = IndexEnumerate.__next__(self)
     neighbors = np.zeros(0,dtype=int)
     if (self.search == 'all') | (self.search == 'forward'):
       for idx_pert in Perturb(idx,1):

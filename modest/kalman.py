@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 from __future__ import division
 import numpy as np
-from nllstsq import jacobian_fd
-from nllstsq import nonlin_lstsq
-from converger import Converger
+from modest.nllstsq import jacobian_fd
+from modest.nllstsq import nonlin_lstsq
+from modest.converger import Converger
 import logging
-from timing import funtime
-import timing
+from modest.timing import funtime
+import modest.timing as timing
 import os
 import h5py
 import scipy.linalg
