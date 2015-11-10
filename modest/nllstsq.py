@@ -128,12 +128,12 @@ def _residual(system,
     '''
     pred = system(model,*system_args,**system_kwargs)
     res = pred - data
+    res = res[data_indices]
     if is1d(data_weight):
       res = data_weight*res
     else:
       res = data_weight.dot(res)
 
-    res = res[data_indices]
     reg = reg_matrix.dot(model)    
     bayes = bayes_matrix.dot(model - prior)
     lm = lm_matrix.dot(0*model)
@@ -165,13 +165,12 @@ def _residual(system,
 
     '''
     jac = jacobian(model,*jacobian_args,**jacobian_kwargs)
-    # if the data weight is 1d then mutiply jac in place with broadcasting
+    jac = jac[data_indices,:]
     if is1d(data_weight):
-      jac *= data_weight[:,None]
+      jac = data_weight[:,None]*jac
     else:
       jac = data_weight.dot(jac)
 
-    jac = jac[data_indices,:]
     jac = np.vstack((lm_matrix,jac,reg_matrix,bayes_matrix))
     return jac
 
@@ -300,8 +299,21 @@ def _arg_parser(args,kwargs):
   if p['output'] is None:
     p['output'] = ['solution'] 
 
+  # cut down data_covariance
+  if is1d(p['data_covariance']): 
+    p['data_covariance'] = p['data_covariance'][p['data_indices']]
+
+  else:
+    data_no = len(p['data_indices'])
+    idx1,idx2 = np.ix_(p['data_indices'],p['data_indices'])
+    p['data_covariance'] = p['data_covariance'][idx1,idx2]
+    # if there is any repeat index in data_indices set covariance to 0
+    # This is done to make it possible to bootstrap 
+    p['data_covariance'][(idx1==idx2) != np.eye(data_no,dtype=bool)] = 0
+
   p['data_weight'] = covariance_to_weight(p.pop('data_covariance'))
   p['prior_weight'] = covariance_to_weight(p.pop('prior_covariance'))
+
   if is1d(p['prior_weight']):
     p['bayes_matrix'] = p.pop('prior_weight')[:,None]*p['bayes_matrix']
   else:
