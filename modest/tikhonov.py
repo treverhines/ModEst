@@ -3,6 +3,8 @@ import numpy as np
 import logging
 from modest.timing import funtime
 from modest.misc import list_flatten
+from future.types import newobject
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,38 +26,40 @@ def linear_to_array_index(val,shape,wrap=False):
       'or equal to the product of the shape. received index %s for '
       'shape %s' % (val,shape))
 
-  N = len(shape)
-  indices = np.zeros(N,int)
-  for count,dimsize in enumerate(shape[::-1]):
-    indices[N-(count+1)] = val%dimsize
-    val = val//dimsize
-  return indices
+  indices = ()
+  for dimsize in shape[::-1]:
+    indices += val%dimsize,
+    val = val // dimsize
+  return indices[::-1]
 
 
-class Perturb:
+class Perturb(newobject):
   def __init__(self,v,delta=1):
     self.v = v
-    self.delta = delta
-    self.itr = 0 
+    self.vtype = type(v)
     self.N = len(v)
+    self.d = delta
+    self.itr = 0 
 
   def __iter__(self):
     return self
 
-  def next(self):
-    return self.__next__()
-
   def __next__(self):
     if self.itr == self.N:
       raise StopIteration
+
     else:
-      out = np.copy(self.v)
-      out[self.itr] += self.delta
+      out = [j if (i != self.itr) else (j + self.d) for i,j in enumerate(self.v)]   
+      if issubclass(self.vtype,np.ndarray):
+        out = np.asarray(out)
+      else:
+        out = self.vtype(out)
+
       self.itr += 1
       return out
       
 
-class IndexEnumerate:
+class ArrayIndexEnumerate(newobject):
   def __init__(self,C):
     '''
     used in tikhonov matrix
@@ -74,52 +78,45 @@ class IndexEnumerate:
     idx: [1, 1], val: 4
     '''
     self.C = np.asarray(C)
-    self.shape = np.shape(C)
-    self.size = np.size(C)
     self.itr = 0
 
   def __iter__(self):
     return self
 
-  def next(self):
-    return self.__next__()
-
   def __next__(self):
-    if self.itr == self.size:
+    if self.itr == self.C.size:
       raise StopIteration
+
     else:
-      idx = linear_to_array_index(self.itr,self.shape)
+      idx = linear_to_array_index(self.itr,self.C.shape)
       self.itr += 1
-      return (idx,self.C[tuple(idx)])
+      return (idx,self.C[idx])
 
 
-class Neighbors(IndexEnumerate):
+class Neighbors(ArrayIndexEnumerate):
   '''
   Iterator that Loops over elements in array C returning the element and its  
   neighbors
   '''
   def __init__(self,C,search='all'):
-    IndexEnumerate.__init__(self,C)
+    ArrayIndexEnumerate.__init__(self,C)
     assert search in ['all','forward','backward']
     self.search = search
 
-  def next(self):
-    return self.__next__()
-
   def __next__(self):
-    idx,val = IndexEnumerate.__next__(self)
-    neighbors = np.zeros(0,dtype=int)
+    idx,val = ArrayIndexEnumerate.__next__(self)
+    neighbors = np.zeros(0,dtype=self.C.dtype)
     if (self.search == 'all') | (self.search == 'forward'):
-      for idx_pert in Perturb(idx,1):
-        if any(idx_pert >= self.shape):
+      for pert in Perturb(idx,1):
+        if any(i>=j for i,j in zip(pert,self.C.shape)):
           continue
-        neighbors = np.append(neighbors,self.C[tuple(idx_pert)])
+        neighbors = np.append(neighbors,self.C[pert])
 
     if (self.search == 'all') | (self.search == 'backward'):
-      for idx_pert in Perturb(idx,-1):
-        if any(idx_pert < 0):
+      for pert in Perturb(idx,-1):
+        if any(i<0 for i in pert):
           continue
-        neighbors = np.append(neighbors,self.C[tuple(idx_pert)])
+        neighbors = np.append(neighbors,self.C[pert])
     
     return neighbors,val
 
