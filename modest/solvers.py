@@ -26,6 +26,8 @@ def _arg_checker(fin):
     assert len(d_shape) == 1
     assert len(G_shape) == 2
     assert G_shape[0] == d_shape[0]
+    assert np.isfinite(G).all()
+    assert np.isfinite(d).all() 
     output = fin(G,d,*args,**kwargs)
     assert len(output) == G_shape[1]
     return output
@@ -161,5 +163,47 @@ def cg(G,d,*args,**kwargs):
   Gtd = G.transpose().dot(d)
   return scipy.sparse.linalg.cg(GtG,Gtd,*args,**kwargs)[0]
 
+@funtime
+@_arg_checker
+def lsmr(G,d,*args,**kwargs):
+  scales = (np.max(G,1) - np.min(G,1)) + 1.0
+  G /= scales[:,None]
+  d /= scales
+  return scipy.sparse.linalg.lsmr(G,d,*args,**kwargs)[0]
 
 
+class _LGMRES:
+  def __init__(self):
+    self.x = None
+
+  def __call__(self,G,d,*args,**kwargs):
+    GtG = G.transpose().dot(G)
+    Gtd = G.transpose().dot(d) 
+    if self.x is None:
+      out = scipy.sparse.linalg.lgmres(GtG,Gtd,*args,**kwargs) 
+    else:
+      x0 = kwargs.pop('x0',self.x) 
+      out = scipy.sparse.linalg.lgmres(GtG,Gtd,x0=x0,*args,**kwargs)
+
+    if out[1] == 0:
+     logger.debug('exit status 0: successful exit')
+
+    if out[1] > 0:
+      print('exit status %s: convergence to tolernace not acheived, number of iterations' % out[1])
+      logger.warning('exit status %s: convergence to tolernace not acheived, number of iterations' % out[1])
+
+    if out[1] < 0:
+      print('exit status %s: illegal input or breakdown' % out[1])
+      logger.warning('exit status %s: illegal input or breakdown' % out[1])
+
+    if np.all(np.isfinite(out[0])):
+      self.x = out[0]
+
+    return out[0]
+  
+
+_lgmres = _LGMRES()
+@funtime
+@_arg_checker
+def lgmres(G,d,*args,**kwargs):
+  return _lgmres(G,d,*args,**kwargs)    

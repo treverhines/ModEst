@@ -42,6 +42,9 @@ class Perturb:
   def __iter__(self):
     return self
 
+  def next(self):
+    return self.__next__()
+
   def __next__(self):
     if self.itr == self.N:
       raise StopIteration
@@ -78,6 +81,9 @@ class IndexEnumerate:
   def __iter__(self):
     return self
 
+  def next(self):
+    return self.__next__()
+
   def __next__(self):
     if self.itr == self.size:
       raise StopIteration
@@ -96,6 +102,9 @@ class Neighbors(IndexEnumerate):
     IndexEnumerate.__init__(self,C)
     assert search in ['all','forward','backward']
     self.search = search
+
+  def next(self):
+    return self.__next__()
 
   def __next__(self):
     idx,val = IndexEnumerate.__next__(self)

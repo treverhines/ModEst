@@ -165,8 +165,9 @@ def _residual(system,
 
     '''
     jac = jacobian(model,*jacobian_args,**jacobian_kwargs)
+    # if the data weight is 1d then mutiply jac in place with broadcasting
     if is1d(data_weight):
-      jac = data_weight[:,None]*jac
+      jac *= data_weight[:,None]
     else:
       jac = data_weight.dot(jac)
 
@@ -562,7 +563,12 @@ def nonlin_lstsq(*args,**kwargs):
       output += p['m_k'],
 
     if s == 'solution_covariance':
-      output += scipy.linalg.pinv(J.transpose().dot(J)),
+      try:
+        soln_cov = scipy.linalg.inv(J.transpose().dot(J))
+      except np.linalg.linalg.LinAlgError:
+        soln_cov = scipy.linalg.pinv(J.transpose().dot(J))
+
+      output += soln_cov,
 
     if s == 'jacobian':
       output += J,
@@ -573,7 +579,11 @@ def nonlin_lstsq(*args,**kwargs):
                             **p['system_kwargs']),
 
     if s == 'predicted_covariance':
-      soln_cov = scipy.linalg.pinv(J.transpose().dot(J))
+      try:
+        soln_cov = scipy.linalg.inv(J.transpose().dot(J))
+      except np.linalg.linalg.LinAlgError:
+        soln_cov = scipy.linalg.pinv(J.transpose().dot(J))
+
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
