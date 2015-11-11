@@ -48,7 +48,7 @@ class Timer:
       itr = 0
       while True:
         n = 'process %s' % itr
-        if n in self.time_dict:
+        if n not in self.time_dict:
           ID = n
           break
 
