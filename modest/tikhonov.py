@@ -3,10 +3,8 @@ import numpy as np
 import logging
 from modest.timing import funtime
 from modest.misc import list_flatten
-from future.types import newobject
 
 logger = logging.getLogger(__name__)
-
 
 def remove_zero_rows(M):
   '''
@@ -33,7 +31,7 @@ def linear_to_array_index(val,shape,wrap=False):
   return indices[::-1]
 
 
-class Perturb(newobject):
+class Perturb:
   def __init__(self,v,delta=1,cast=np.asarray):
     self.v = v
     self.cast = cast
@@ -43,6 +41,10 @@ class Perturb(newobject):
 
   def __iter__(self):
     return self
+
+  # this is for python 2 compatibility
+  def next(self):
+    return self.__next__()
 
   def __next__(self):
     if self.k == self.N:
@@ -55,7 +57,7 @@ class Perturb(newobject):
       return self.cast(out)
       
 
-class ArrayIndexEnumerate(newobject):
+class ArrayIndexEnumerate:
   def __init__(self,C):
     '''
     used in tikhonov matrix
@@ -79,6 +81,10 @@ class ArrayIndexEnumerate(newobject):
   def __iter__(self):
     return self
 
+  # this is for python 2 compatibility
+  def next(self):
+    return self.__next__()
+
   def __next__(self):
     if self.itr == self.C.size:
       raise StopIteration
@@ -98,6 +104,9 @@ class Neighbors(ArrayIndexEnumerate):
     ArrayIndexEnumerate.__init__(self,C)
     assert search in ['all','forward','backward']
     self.search = search
+
+  def next(self):
+    return self.__next__()
 
   def __next__(self):
     idx,val = ArrayIndexEnumerate.__next__(self)
