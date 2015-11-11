@@ -182,6 +182,8 @@ class _LGMRES:
     if self.x is None:
       out = scipy.sparse.linalg.lgmres(GtG,Gtd,*args,**kwargs) 
     else:
+      if self.x.shape[0] != GtG.shape[0]:
+        self.x = None
       x0 = kwargs.pop('x0',self.x) 
       out = scipy.sparse.linalg.lgmres(GtG,Gtd,x0=x0,*args,**kwargs)
 
@@ -195,9 +197,6 @@ class _LGMRES:
     if out[1] < 0:
       print('exit status %s: illegal input or breakdown' % out[1])
       logger.warning('exit status %s: illegal input or breakdown' % out[1])
-
-    if np.all(np.isfinite(out[0])):
-      self.x = out[0]
 
     return out[0]
   

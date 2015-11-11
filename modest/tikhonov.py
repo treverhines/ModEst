@@ -34,29 +34,25 @@ def linear_to_array_index(val,shape,wrap=False):
 
 
 class Perturb(newobject):
-  def __init__(self,v,delta=1):
+  def __init__(self,v,delta=1,cast=np.asarray):
     self.v = v
-    self.vtype = type(v)
+    self.cast = cast
     self.N = len(v)
     self.d = delta
-    self.itr = 0 
+    self.k = 0 
 
   def __iter__(self):
     return self
 
   def __next__(self):
-    if self.itr == self.N:
+    if self.k == self.N:
       raise StopIteration
 
     else:
-      out = [j if (i != self.itr) else (j + self.d) for i,j in enumerate(self.v)]   
-      if issubclass(self.vtype,np.ndarray):
-        out = np.asarray(out)
-      else:
-        out = self.vtype(out)
-
-      self.itr += 1
-      return out
+      out = [j if (i != self.k) else (j + self.d) 
+             for i,j in enumerate(self.v)]   
+      self.k += 1
+      return self.cast(out)
       
 
 class ArrayIndexEnumerate(newobject):
@@ -107,13 +103,13 @@ class Neighbors(ArrayIndexEnumerate):
     idx,val = ArrayIndexEnumerate.__next__(self)
     neighbors = np.zeros(0,dtype=self.C.dtype)
     if (self.search == 'all') | (self.search == 'forward'):
-      for pert in Perturb(idx,1):
+      for pert in Perturb(idx,1,cast=tuple):
         if any(i>=j for i,j in zip(pert,self.C.shape)):
           continue
         neighbors = np.append(neighbors,self.C[pert])
 
     if (self.search == 'all') | (self.search == 'backward'):
-      for pert in Perturb(idx,-1):
+      for pert in Perturb(idx,-1,cast=tuple):
         if any(i<0 for i in pert):
           continue
         neighbors = np.append(neighbors,self.C[pert])
