@@ -64,7 +64,7 @@ def is1d(A):
 def isdiagonal(A):
   return np.all(np.diag(np.diag(A)) == A)
 
-def covariance_to_weight(C):
+def covariance_to_weight(C,tol=1e-16):
   '''returns the weight matrix, W, which satisfies
 
        np.linalg.inv(C) = W.transpose().dot(W)                     (1)
@@ -90,15 +90,23 @@ def covariance_to_weight(C):
 
   '''
   if is1d(C):
+    are_zero = C < tol
+    C[are_zero] = tol
+
     W = 1.0/np.sqrt(C)
 
   elif isdiagonal(C):
+    are_zero = np.diag(C) < tol
+    C[are_zero,are_zero] = tol
+
     W = 1.0/np.sqrt(np.diag(C))
 
   else:
     N = np.shape(C)[0]
-    A = scipy.linalg.cholesky(C,lower=True)
+    are_zero = np.diag(C) < tol
+    C[are_zero,are_zero] = tol
 
+    A = scipy.linalg.cholesky(C,lower=True)
     W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True,overwrite_b=True)
 
   return W

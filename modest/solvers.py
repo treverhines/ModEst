@@ -175,8 +175,14 @@ def dgs(G,d,*args,**kwargs):
   '''
   direct solve of Gram matrix
   '''
-  return scipy.linalg.solve(G.T.dot(G),G.T.dot(d),sym_pos=True,*args,**kwargs)
-
+  #print(np.linalg.cond(G))
+  try:
+    return scipy.linalg.solve(G.T.dot(G),G.T.dot(d),sym_pos=True,*args,**kwargs)
+  except np.linalg.linalg.LinAlgError:
+    print('shit fucked up!')
+    import matplotlib.pyplot as plt
+    plt.imshow(G)
+    plt.show()
 
 class _LGMRES:
   def __init__(self):
