@@ -7,7 +7,6 @@ from modest.tikhonov import Perturb
 from modest.tikhonov import tikhonov_matrix
 from modest.timing import funtime
 import scipy.sparse
-import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +171,7 @@ def _residual(system,
       jac = data_weight.dot(jac)
 
     jac = np.vstack((lm_matrix,jac,reg_matrix,bayes_matrix))
+
     return jac
 
   return residual_function,residual_jacobian

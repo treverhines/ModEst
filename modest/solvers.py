@@ -159,9 +159,7 @@ def cg(G,d,*args,**kwargs):
   solves GtG = Gtd using scipy's cg solver. This tends to be
   about as fast as cgls
   '''
-  GtG = G.transpose().dot(G)
-  Gtd = G.transpose().dot(d)
-  return scipy.sparse.linalg.cg(GtG,Gtd,*args,**kwargs)[0]
+  return scipy.sparse.linalg.cg(G.T.dot(G),G.T.dot(d),*args,**kwargs)[0]
 
 @funtime
 @_arg_checker
@@ -171,21 +169,33 @@ def lsmr(G,d,*args,**kwargs):
   d /= scales
   return scipy.sparse.linalg.lsmr(G,d,*args,**kwargs)[0]
 
+@funtime
+@_arg_checker
+def dgs(G,d,*args,**kwargs):
+  '''
+  direct solve of Gram matrix
+  '''
+  return scipy.linalg.solve(G.T.dot(G),G.T.dot(d),sym_pos=True,*args,**kwargs)
+
 
 class _LGMRES:
   def __init__(self):
     self.x = None
 
   def __call__(self,G,d,*args,**kwargs):
-    GtG = G.transpose().dot(G)
-    Gtd = G.transpose().dot(d) 
+    scale = np.max(np.abs(G),0) 
+    print(np.linalg.cond(G))
+    G /= scale
+    print(np.linalg.cond(G))
     if self.x is None:
-      out = scipy.sparse.linalg.lgmres(GtG,Gtd,*args,**kwargs) 
+      out = scipy.sparse.linalg.lgmres(G.T.dot(G),G.T.dot(d),*args,**kwargs) 
     else:
-      if self.x.shape[0] != GtG.shape[0]:
+      if self.x.shape[0] != G.shape[1]:
         self.x = None
-      x0 = kwargs.pop('x0',self.x) 
-      out = scipy.sparse.linalg.lgmres(GtG,Gtd,x0=x0,*args,**kwargs)
+      x0 = kwargs.pop('x0',self.x*scale) 
+      out = scipy.sparse.linalg.lgmres(G.T.dot(G),G.T.dot(d),x0=x0,*args,**kwargs)
+
+    self.x = out[0]/scale
 
     if out[1] == 0:
      logger.debug('exit status 0: successful exit')
@@ -198,7 +208,7 @@ class _LGMRES:
       print('exit status %s: illegal input or breakdown' % out[1])
       logger.warning('exit status %s: illegal input or breakdown' % out[1])
 
-    return out[0]
+    return out[0]/scale
   
 
 _lgmres = _LGMRES()
