@@ -109,6 +109,9 @@ def covariance_to_weight(C,tol=1e-16):
     A = scipy.linalg.cholesky(C,lower=True)
     W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True,overwrite_b=True)
 
+  if np.any(are_zero):
+    logger.warning('found an replaced variances less than tolerance of %s' % tol)
+ 
   return W
   
 ##------------------------------------------------------------------------------
