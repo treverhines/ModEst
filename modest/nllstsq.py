@@ -181,8 +181,9 @@ def _residual(system,
     else:
       jac = data_weight.dot(jac)
 
-    jac = np.vstack((lm_matrix,jac,reg_matrix,bayes_matrix))
-
+    jac = np.vstack((jac,reg_matrix,bayes_matrix))
+    jac = np.vstack((np.linalg.norm(jac,axis=0)*lm_matrix,jac))
+    print(jac)
     return jac
 
   return residual_function,residual_jacobian
