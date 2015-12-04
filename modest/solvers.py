@@ -178,10 +178,12 @@ def dgs(G,d,*args,**kwargs):
   #print(np.linalg.cond(G))
   try:
     return scipy.linalg.solve(G.T.dot(G),G.T.dot(d),sym_pos=True,*args,**kwargs)
-  except np.linalg.linalg.LinAlgError:
-    print('shit fucked up!')
+  except ValueError:
     import matplotlib.pyplot as plt
+    plt.figure(1)
     plt.imshow(G)
+    plt.figure(2)
+    plt.plot(d)
     plt.show()
 
 class _LGMRES:
