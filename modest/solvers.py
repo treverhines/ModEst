@@ -10,7 +10,6 @@ import scipy.linalg
 import modest._bvls as _bvls
 from modest.converger import Converger
 import logging
-from modest.timing import funtime
 logger = logging.getLogger(__name__)
 
 def _arg_checker(fin):
@@ -36,7 +35,6 @@ def _arg_checker(fin):
   fout.__name__ = fin.__name__
   return fout
 
-@funtime
 @_arg_checker
 def lstsq(G,d,*args,**kwargs):
   '''                                     
@@ -46,7 +44,6 @@ def lstsq(G,d,*args,**kwargs):
   #out = np.linalg.lstsq(G,d,*args,**kwargs)[0]
   return out
 
-@funtime
 @_arg_checker
 def nnls(G,d,*args,**kwargs):
   '''               
@@ -55,7 +52,6 @@ def nnls(G,d,*args,**kwargs):
   out = scipy.optimize.nnls(G,d,*args,**kwargs)[0]
   return out
 
-@funtime
 @_arg_checker
 def bvls(G,d,lower_lim,upper_lim):
   '''                                                                                         
@@ -111,7 +107,6 @@ def bvls(G,d,lower_lim,upper_lim):
 
   return soln
 
-@funtime
 @_arg_checker
 def cgls(G,d,m_o=None,maxitr=2000,rtol=1e-16,atol=1e-16):
   '''
@@ -152,7 +147,6 @@ def cgls(G,d,m_o=None,maxitr=2000,rtol=1e-16,atol=1e-16):
 
   return m_o
 
-@funtime
 @_arg_checker
 def cg(G,d,*args,**kwargs):
   '''
@@ -161,7 +155,6 @@ def cg(G,d,*args,**kwargs):
   '''
   return scipy.sparse.linalg.cg(G.T.dot(G),G.T.dot(d),*args,**kwargs)[0]
 
-@funtime
 @_arg_checker
 def lsmr(G,d,*args,**kwargs):
   scales = (np.max(G,1) - np.min(G,1)) + 1.0
@@ -169,22 +162,13 @@ def lsmr(G,d,*args,**kwargs):
   d /= scales
   return scipy.sparse.linalg.lsmr(G,d,*args,**kwargs)[0]
 
-@funtime
 @_arg_checker
 def dgs(G,d,*args,**kwargs):
   '''
   direct solve of Gram matrix
   '''
   #print(np.linalg.cond(G))
-  try:
-    return scipy.linalg.solve(G.T.dot(G),G.T.dot(d),sym_pos=True,*args,**kwargs)
-  except ValueError:
-    import matplotlib.pyplot as plt
-    plt.figure(1)
-    plt.imshow(G)
-    plt.figure(2)
-    plt.plot(d)
-    plt.show()
+  return scipy.linalg.solve(G.T.dot(G),G.T.dot(d),sym_pos=True,*args,**kwargs)
 
 class _LGMRES:
   def __init__(self):
@@ -220,7 +204,6 @@ class _LGMRES:
   
 
 _lgmres = _LGMRES()
-@funtime
 @_arg_checker
 def lgmres(G,d,*args,**kwargs):
   return _lgmres(G,d,*args,**kwargs)    

@@ -61,57 +61,48 @@ def jacobian_fd(m_o,
 def is1d(A):
   return (len(np.shape(A)) == 1)
 
-def isdiagonal(A):
-  return np.all(np.diag(np.diag(A)) == A)
-
-def covariance_to_weight(C,tol=1e-16):
-  '''returns the weight matrix, W, which satisfies
-
-       np.linalg.inv(C) = W.transpose().dot(W)                     (1)
-
-     If C is a diagonal matrix, then this is simply done by returning
-     a diagonal matrix containing the inverse square root of the
-     diagonal components
-   
-     Otherwise, this is done by using Cholesky factorization of C to
-     find A such that
+def covariance_to_weight(C):
+  '''
+  Description
+  -----------
+    Converts a covariance matrix into a weight matrix by using a
+    Cholesky decomposition.  If C is a 1D array then the weights will be
+    the square root of the reciprocal of C. The output of this function
+    will always have the same shape as C
   
-       C = A.dot(A.transpose()).                                   (2)
+    The weight matrix, W, satisfies
 
-     W is then just the inverse of A.  The decomposition of C into W
-     is not unique, but since The solution for any least squares 
-     problem depends on C, rather than W, any value of W 'should' do 
-     just fine as long as it satisfies (1).
+      np.linalg.inv(C) = W.T.dot(W)                     (1)
+
+    W is found by using Cholesky factorization of C to find A such
+    that
   
-     Notes
-     -----
+      C = A.dot(A.T).                                   (2)
 
-     This function is SLOW
+    W is then just the inverse of A.  The decomposition of C into W
+    is not unique, but since The solution for any least squares 
+    problem depends on C, rather than W, any value of W should do 
+    just fine as long as it satisfies (1).
+  
+  Notes
+  -----
+    This function can be slow
 
   '''
+  C = np.asarray(C)
+  
+  # if C is an empty array then return an empty array 
+  if C.size == 0:
+    return np.copy(C)
+
   if is1d(C):
-    are_zero = C < tol
-    C[are_zero] = tol
-
     W = 1.0/np.sqrt(C)
-
-  elif isdiagonal(C):
-    are_zero = np.diag(C) < tol
-    C[are_zero,are_zero] = tol
-
-    W = 1.0/np.sqrt(np.diag(C))
 
   else:
     N = np.shape(C)[0]
-    are_zero = np.diag(C) < tol
-    C[are_zero,are_zero] = tol
-
     A = scipy.linalg.cholesky(C,lower=True)
     W = scipy.linalg.solve_triangular(A,np.eye(N),lower=True,overwrite_b=True)
 
-  if np.any(are_zero):
-    logger.warning('found an replaced variances less than tolerance of %s' % tol)
- 
   return W
   
 ##------------------------------------------------------------------------------
@@ -182,13 +173,11 @@ def _residual(system,
       jac = data_weight.dot(jac)
 
     jac = np.vstack((lm_matrix,jac,reg_matrix,bayes_matrix))
-
     return jac
 
   return residual_function,residual_jacobian
 
 ##------------------------------------------------------------------------------
-@funtime
 def _arg_parser(args,kwargs):
   '''parses and checks arguments for nonlin_lstsq()'''
   assert len(args) == 3, 'nonlin_lstsq takes exactly 3 positional arguments'
@@ -215,7 +204,7 @@ def _arg_parser(args,kwargs):
 
   for key,val in kwargs.items():
     assert key in p.keys(), (
-      'invalid keyword argument for nonlin_lstsq(): %s' % key)
+      'invalid keyword argument for nonlin_lstsq: %s' % key)
 
   p.update(kwargs)
   p['system'] = args[0]
@@ -271,7 +260,7 @@ def _arg_parser(args,kwargs):
   if p['solver_kwargs'] is None:
     p['solver_kwargs'] = {}
 
-  # default to assuming all data will be used.  This functionality is added for
+  # default to assuming all data will be used.  This functionality is added 
   # to make cross validation easier
   if p['data_indices'] is None:
     p['data_indices'] = range(len(p['data']))
@@ -333,7 +322,6 @@ def _arg_parser(args,kwargs):
   return p
 
 ##------------------------------------------------------------------------------
-@funtime
 def nonlin_lstsq(*args,**kwargs):
   '''Newtons method for solving a least squares problem
 
@@ -432,8 +420,8 @@ def nonlin_lstsq(*args,**kwargs):
       inversion. (default: range(N))
 
     output: list of strings indicating what this function returns. Can
-      be 'solution', 'solution_uncertainty', 'predicted',
-      'predicted_uncertainty', 'misfit', or 'iterations' (default:
+      be 'solution', 'solution_covariance', 'predicted',
+      'predicted_covariance', 'misfit', or 'iterations' (default:
       ['solution'])
 
   Returns
@@ -587,9 +575,9 @@ def nonlin_lstsq(*args,**kwargs):
 
     if s == 'solution_covariance':
       try:
-        soln_cov = scipy.linalg.inv(J.transpose().dot(J))
+        soln_cov = scipy.linalg.inv(J.T.dot(J))
       except np.linalg.linalg.LinAlgError:
-        soln_cov = scipy.linalg.pinv(J.transpose().dot(J))
+        soln_cov = scipy.linalg.pinv(J.T.dot(J))
 
       output += soln_cov,
 
@@ -603,14 +591,14 @@ def nonlin_lstsq(*args,**kwargs):
 
     if s == 'predicted_covariance':
       try:
-        soln_cov = scipy.linalg.inv(J.transpose().dot(J))
+        soln_cov = scipy.linalg.inv(J.T.dot(J))
       except np.linalg.linalg.LinAlgError:
-        soln_cov = scipy.linalg.pinv(J.transpose().dot(J))
+        soln_cov = scipy.linalg.pinv(J.T.dot(J))
 
       obs_jac = p['jacobian'](p['m_k'],
                               *p['jacobian_args'],
                               **p['jacobian_kwargs'])
-      output += obs_jac.dot(soln_cov).dot(obs_jac.transpose()),
+      output += obs_jac.dot(soln_cov).dot(obs_jac.T),
 
     if s == 'misfit':
       output += err_curr,

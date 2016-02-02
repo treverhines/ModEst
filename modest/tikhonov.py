@@ -10,8 +10,13 @@ def remove_zero_rows(M):
   '''
   used in tikhonov_matrix
   '''
-  return np.array([i for i in M if np.any(i)])
+  out = np.zeros((0,M.shape[1]))
+  for m in M:
+    if np.any(m):
+      out = np.vstack((out,m))
 
+  #  return np.array([i for i in M if np.any(i)])
+  return out
 
 def linear_to_array_index(val,shape,wrap=False):
   '''
@@ -207,7 +212,13 @@ def tikhonov_matrix(C,n,column_no=None,dtype=None):
          'all values in C, except for -1, must be unique')
 
   Cdim = len(np.shape(C))
-  max_param = np.max(C) + 1
+
+  if np.size(C) == 0:
+    max_param = 0
+
+  else: 
+    max_param = np.max(C) + 1
+
   if column_no is None:
     column_no = max_param
 
