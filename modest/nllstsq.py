@@ -11,51 +11,41 @@ import scipy.sparse
 logger = logging.getLogger(__name__)
 
 ##------------------------------------------------------------------------------
-def jacobian_fd(m_o,
-                system,
-                system_args=None,
-                system_kwargs=None,
-                dm=1e-4,
-                dtype=None):
+def make_jacobian(system,dm=1e-4):
   '''
+  Description
+  -----------
+    Creates a finite diffrence Jacobian function
+
   Parameters
   ----------
+    system: callable which takes a vector of model parameters as its 
+      first argument 
 
-    system: function where the first argument is a list of model
-      parameters and the output is a data list
+    dm: step size used to estimate the derivatives
 
-    m_o: location in model space where the jacobian will be
-      computed. must be a mutable sequence (e.g. np.array or list)
+  Returns 
+  ------- 
+    jacobian: callable which takes a vector of model parameters as its
+      first argument and returns an approximation to the Jacobian
+      matrix at that point in model space. Additional args and kwargs
+      get passed to the system function.
 
-    system_args: additional arguments to system
+  '''
+  def jacobian(m_ref,*args,**kwargs):
+    data_ref = system(m_ref,*args,**kwargs)
+    data_ref = np.asarray(data_ref)
+    param_no = len(m_ref)
+    data_no = len(data_ref)
+    jac = np.zeros((data_no,param_no))
+    for i,m_pert in enumerate(Perturb(m_ref,dm)):
+      data_pert = system(m_pert,*args,**kwargs)
+      data_pert = np.asarray(data_pert)
+      jac[:,i]  = (data_pert - data_ref)/dm
 
-    system_kargs: additional key word arguments to system
+    return jac
 
-    dm: step size used for the finite difference approximation
-
-  Returns
-  -------
-    J:  jacobian matrix with dimensions: len(data),len(parameters)
-
-  ''' 
-  if system_args is None:
-    system_args = []
-  if system_kwargs is None:
-    system_kwargs = {}
-
-  data_o = system(m_o,*system_args,**system_kwargs)
-  data_o = np.asarray(data_o)
-  param_no = len(m_o)
-  data_no = len(data_o)
-  Jac = np.zeros((data_no,param_no),dtype=dtype)
-  i = 0
-  for m_pert in Perturb(m_o,dm):
-    data_pert = system(m_pert,*system_args,**system_kwargs)
-    data_pert = np.asarray(data_pert)
-    Jac[:,i]  = (data_pert - data_o)/dm
-    i += 1
-
-  return Jac
+  return jacobian
 
 ##------------------------------------------------------------------------------
 def is1d(A):
@@ -243,11 +233,10 @@ def _arg_parser(args,kwargs):
 
   # if no jacobian is provided then set use the finite difference approximation
   if p['jacobian'] is None:
-    p['jacobian'] = jacobian_fd
-    p['jacobian_args'] = [p['system']]
-    p['jacobian_kwargs'] = {'system_args':p['system_args'],
-                            'system_kwargs':p['system_kwargs']}
-
+    p['jacobian'] = make_jacobian(p['system'])
+    p['jacobian_args'] = p['system_args']
+    p['jacobian_kwargs'] = p['system_kwargs']
+  
   if p['jacobian_args'] is None:
     p['jacobian_args'] = []
 

@@ -15,7 +15,6 @@ def remove_zero_rows(M):
     if np.any(m):
       out = np.vstack((out,m))
 
-  #  return np.array([i for i in M if np.any(i)])
   return out
 
 def linear_to_array_index(val,shape,wrap=False):

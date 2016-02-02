@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from __future__ import division
 import numpy as np
-from modest.nllstsq import jacobian_fd
+from modest.nllstsq import make_jacobian
 from modest.nllstsq import nonlin_lstsq
 from modest.converger import Converger
 import logging
@@ -188,10 +188,7 @@ def make_default_tjac(trans):
   The transition jacobian function returns the jacobian matrix of the
   transition function with respect to the state parameters
   '''
-  def default_tjac(state,dt,*args,**kwargs):
-    return jacobian_fd(state,trans,
-                       system_args=(dt,)+args,
-                       system_kwargs=kwargs)
+  default_tjac = make_jacobian(trans)
   return default_tjac
 
 
@@ -218,10 +215,7 @@ def make_default_ojac(obs):
   The observation jacobian function returns the jacobian matrix of the
   observation function with respect to the state parameters
   '''
-  def default_ojac(state,t,*args,**kwargs):
-    return jacobian_fd(state,obs,
-                       system_args=(t,)+args,
-                       system_kwargs=kwargs)
+  default_ojac = make_jacobian(obs)
   return default_ojac
 
 
