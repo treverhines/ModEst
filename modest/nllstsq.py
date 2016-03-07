@@ -570,6 +570,17 @@ def nonlin_lstsq(*args,**kwargs):
 
       output += soln_cov,
 
+    if s == 'solution_resolution':
+      jac_inv =  scipy.linalg.pinv(J)
+      obs_jac = p['jacobian'](p['m_k'],
+                              *p['jacobian_args'],
+                              **p['jacobian_kwargs'])
+      top_pad_length = p['lm_matrix'].shape[0]
+      bot_pad_length = p['bayes_matrix'].shape[0] + p['regularization'].shape[0]
+      obs_jac = np.pad(obs_jac,((top_pad_length,bot_pad_length),(0,0)),'constant')
+      soln_res = jac_inv.dot(obs_jac)
+      output += soln_res,
+
     if s == 'jacobian':
       output += J,
 
@@ -594,6 +605,7 @@ def nonlin_lstsq(*args,**kwargs):
 
     if s == 'iterations':
       output += counter,
+
 
   if len(output) == 1:
     output = output[0]
