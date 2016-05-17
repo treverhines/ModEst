@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 ##------------------------------------------------------------------------------
 def make_jacobian(system,dm=1e-4):
-  '''
+  ''' 
   Description
   -----------
     Creates a finite diffrence Jacobian function
@@ -52,7 +52,7 @@ def is1d(A):
   return (len(np.shape(A)) == 1)
 
 def covariance_to_weight(C):
-  '''
+  ''' 
   Description
   -----------
     Converts a covariance matrix into a weight matrix by using a
@@ -109,11 +109,11 @@ def _residual(system,
                lm_matrix,
                bayes_matrix,
                data_indices):
-  '''
+  ''' 
   used for nonlin_lstsq
-  '''  
+  '''
   def residual_function(model):
-    '''
+    ''' 
     evaluates the function to be minimized for the given model
 
     '''
@@ -131,7 +131,7 @@ def _residual(system,
     return np.hstack((lm,res,reg,bayes))
 
   def residual_jacobian(model):
-    '''
+    ''' 
     evaluates the jacobian of the objective function at the given model
 
     The Jacobian consists of:

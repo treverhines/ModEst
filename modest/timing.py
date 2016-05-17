@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def decyear_inv(decyear,format='%Y-%m-%dT%H:%M:%S'):
-  '''
+  ''' 
   convert decimal year to date
   '''
   year = int(np.floor(decyear))
@@ -25,7 +25,7 @@ def decyear_inv(decyear,format='%Y-%m-%dT%H:%M:%S'):
 
 
 def decyear(*args):
-  '''
+  ''' 
   converts date to decimal year
   '''
   date_tuple      = datetime.datetime(*args).timetuple()
@@ -108,7 +108,7 @@ GLOBAL_TIMER = Timer()
 
 
 def funtime(fun):
-  '''
+  ''' 
   decorator which times a function
   '''
   @wraps(fun)

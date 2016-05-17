@@ -1,6 +1,8 @@
-from nllstsq import *
-from tikhonov import *
-from kalman import *
-from timing import *
-from base import *
-from misc import *
+from modest.nllstsq import *
+from modest.tikhonov import *
+from modest.kalman import *
+from modest.timing import *
+from modest.base import *
+from modest.misc import *
+#from modest.solvers import *
+

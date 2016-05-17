@@ -32,7 +32,7 @@ def _base10_to_baseN(value_base10,base_char):
 
 
 def baseNtoM(value,N,M):
-  '''
+  ''' 
   converts an integer in base N to a value in base M
 
   PARAMETERS
@@ -87,7 +87,7 @@ def baseNtoM(value,N,M):
   
 
 def timestamp(factor=1.0):
-  '''
+  ''' 
   Description:
   Returns base 36 value of output from time.time() plus a character
   that identifies the computer this function was called from

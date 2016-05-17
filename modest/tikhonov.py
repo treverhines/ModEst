@@ -7,7 +7,7 @@ from modest.misc import list_flatten
 logger = logging.getLogger(__name__)
 
 def remove_zero_rows(M):
-  '''
+  ''' 
   used in tikhonov_matrix
   '''
   out = np.zeros((0,M.shape[1]))
@@ -18,7 +18,7 @@ def remove_zero_rows(M):
   return out
 
 def linear_to_array_index(val,shape,wrap=False):
-  '''
+  ''' 
   used in next method of IndexEnumerate
   '''
   if (not wrap) & (abs(val)+(val>0) > np.prod(shape)):
@@ -63,7 +63,7 @@ class Perturb:
 
 class ArrayIndexEnumerate:
   def __init__(self,C):
-    '''
+    ''' 
     used in tikhonov matrix
 
     enumerates over the flattened elements of C and their index locations in C
@@ -100,7 +100,7 @@ class ArrayIndexEnumerate:
 
 
 class Neighbors(ArrayIndexEnumerate):
-  '''
+  ''' 
   Iterator that Loops over elements in array C returning the element and its  
   neighbors
   '''
@@ -131,7 +131,7 @@ class Neighbors(ArrayIndexEnumerate):
 
 
 def _tikhonov_zeroth_order(C,L):
-  '''
+  ''' 
   used in tikhonov_matrix
   '''
   for val in C.flat:
@@ -143,7 +143,7 @@ def _tikhonov_zeroth_order(C,L):
 
 
 def _tikhonov_first_order(C,L):
-  '''
+  ''' 
   used in tikhonov_matrix
   '''
   shape = np.shape(C)
@@ -162,7 +162,7 @@ def _tikhonov_first_order(C,L):
 
 
 def _tikhonov_second_order(C,L):
-  '''
+  ''' 
   used in tikhonov_matrix
   '''
   shape = np.shape(C)
@@ -181,7 +181,7 @@ def _tikhonov_second_order(C,L):
 
 @funtime
 def tikhonov_matrix(C,n,column_no=None,dtype=None):
-  '''
+  ''' 
   Parameters
   ----------
     C: connectivity matrix, this can contain '-1' elements which can be used

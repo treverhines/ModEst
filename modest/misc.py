@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def listify(a):
-  '''
+  ''' 
   recursively convert an iterable into a list
   '''
   out = []
@@ -25,7 +25,7 @@ def listify(a):
 
 
 def list_flatten(lst):
-  '''
+  ''' 
   recursively flatten an iterable into a 1D list
   '''
   lst = list(lst)
@@ -76,7 +76,7 @@ def find_indices(domain,realizations):
 
 
 def pad(M,pad_shape,value=0,dtype=None):
-  '''
+  ''' 
   returns an array containing the values from M but the ends of each dimension
   are padded with 'value' so that the returned array has shape 'pad_shape'
   '''
@@ -105,7 +105,7 @@ def pad(M,pad_shape,value=0,dtype=None):
 
 
 def pad_stack(arrays,axis=0,**kwargs):
-  '''
+  ''' 
   stacks array along the specified dimensions and any inconsistent dimension
   sizes are dealt with by padding the smaller array with 'value'  
   '''

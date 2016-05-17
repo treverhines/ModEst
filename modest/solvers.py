@@ -109,7 +109,7 @@ def bvls(G,d,lower_lim,upper_lim):
 
 @_arg_checker
 def cgls(G,d,m_o=None,maxitr=2000,rtol=1e-16,atol=1e-16):
-  '''
+  ''' 
   congugate gradient least squares
 
   algorithm from Aster et al. 2005
@@ -149,7 +149,7 @@ def cgls(G,d,m_o=None,maxitr=2000,rtol=1e-16,atol=1e-16):
 
 @_arg_checker
 def cg(G,d,*args,**kwargs):
-  '''
+  ''' 
   solves GtG = Gtd using scipy's cg solver. This tends to be
   about as fast as cgls
   '''
@@ -164,7 +164,7 @@ def lsmr(G,d,*args,**kwargs):
 
 @_arg_checker
 def dgs(G,d,*args,**kwargs):
-  '''
+  ''' 
   direct solve of Gram matrix
   '''
   #print(np.linalg.cond(G))

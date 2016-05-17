@@ -2,7 +2,7 @@
 import numpy as np
 
 class Converger:
-  '''
+  ''' 
   Class which checks residual and returns a status depending on how
   the residual is converging
 
