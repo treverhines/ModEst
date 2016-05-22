@@ -1,11 +1,70 @@
 #!/usr/bin/env python
 # Generalize Cross Validation
-import numpy as np
-from modest.timing import funtime
-from numpy.linalg import pinv
-from numpy.linalg import inv
-import scipy.optimize
-import matplotlib.pyplot as plt
+import numpy as np 
+from numpy.linalg import pinv 
+from numpy.linalg import inv 
+from scipy.sparse import isspmatrix 
+import scipy.sparse.linalg as spla
+import scipy.optimize 
+import matplotlib.pyplot as plt 
+import logging 
+import rbf.halton
+
+logger = logging.getLogger(__name__)
+
+
+def dense_direct_solve(A,L,data):
+  lhs = A.T.dot(A) + L.T.dot(L)
+  rhs = A.T.dot(data)
+  return np.linalg.solve(lhs,rhs)
+
+
+def sparse_direct_solve(A,L,data,**kwargs):
+  ''' 
+  solves the least squares problem with LU factorization
+  '''
+  A = A.tocsr()
+  L = L.tocsr()
+  lhs = A.T.dot(A) + L.T.dot(L)
+  rhs = A.T.dot(data) 
+  soln = spla.spsolve(lhs,rhs,**kwargs)
+  return soln
+
+
+def sparse_iter_solve(A,L,data,**kwargs):
+  ''' 
+  solves the least squares problem with lsqr
+  '''
+  msg = {0:'The exact solution is  x = 0',
+         1:'Ax - b is small enough, given atol, btol',
+         2:'The least-squares solution is good enough, given atol',
+         3:'The estimate of cond(Abar) has exceeded conlim',
+         4:'Ax - b is small enough for this machine',
+         5:'The least-squares solution is good enough for this machine',
+         6:'Cond(Abar) seems to be too large for this machine',
+         7:'The iteration limit has been reached',
+         8:'The truncated direct error is small enough, given etol'}
+
+  A = A.tocsr()
+  L = L.tocsr()
+  A_ext = scipy.sparse.vstack((A,L))
+  data_ext = np.concatenate((data,np.zeros(L.shape[0])))
+  out = spla.lsqr(A_ext,data_ext,**kwargs)
+  soln = out[0]
+  istop = out[1]
+  if istop not in [1,2]:
+    print('WARNING: %s' % msg[istop])
+    logger.warning(msg[istop])
+
+  else:
+    logger.info(msg[istop])
+
+  return soln
+
+
+def chunkify(list,N):
+    return [list[i::N] for i in range(N)]
+
 
 def product_trace(A,B):
   ''' 
@@ -16,6 +75,8 @@ def product_trace(A,B):
 
 def gcv_predictive_error(alpha,A,L,data):
   ''' 
+  DEPRICATED 
+ 
   solves 
 
     |   A     | m = | data |
@@ -25,9 +86,6 @@ def gcv_predictive_error(alpha,A,L,data):
   matrix.  Then this function returns the predictive error of the 
   solution using generalized cross validation
   '''
-  # map alpha to an entirely positive domain
-  # alpha = 10**log_alpha
-
   # compute generalized inverse
   try:
     # compute the inverse with the pseudo inverse, which is more 
@@ -55,43 +113,171 @@ def gcv_predictive_error(alpha,A,L,data):
   return numerator/denominator
 
 
-def cv_predictive_error(alpha,A,L,data):
+def dense_cv_predictive_error(damping,A,L,data,fold=10):
   ''' 
-  returns the predictive error using cross validation
+  Description
+  -----------
+    Computes the predictive error for the given damping parameter(s).
+  
+  Parameters
+  ----------
+    damping: damping parameter or list of damping parameters for each 
+      regularization matrix in L
+
+    A: (N,M) dense system matrix
+
+    L: (K,M) regularization matrix or list of regularization matrices
+
+    data: (N,) data array
+
+    fold (default=10): number of cross validation folds
+   
+    dsolve (default=True): use a direct LU factorization to solve. 
+      An iterative solve is used otherwise.
+
+  Note
+  ----
+    additional key word arguments are passed to the solver
   '''
-  N,M = A.shape  
+  # make input a list if it is not already
+  if not hasattr(damping,'__iter__'):
+    damping = [damping]
+    L = [L]
+
+  if len(damping) != len(L):
+    raise ValueError(
+      'number of damping parameters must equal number of '
+      'regularization matrices')
+
+  if not all(np.isscalar(d) for d in damping):
+    raise TypeError(
+      'damping must be a scalar or list of scalars')
+
+  # scale regularization matrices. note that this makes copies 
+  L = [k*d for d,k in zip(damping,L)]
+
+  # stack regularization matrices
+  L = np.vstack(L)
+
+  N = A.shape[0]  
   K = L.shape[0]
-  residual = np.zeros(N)
-  # allocate an array for stacked A and L matrices
-  A_ext = np.zeros((N-1+K,M))
-  A_ext[N-1:,:] = alpha*L
-  data_ext = np.zeros(N+K-1)
-  for removed_idx in range(N):
-    kept_idx = np.delete(np.arange(N),removed_idx)
-    A_ext[:N-1,:] = A[kept_idx,:]
-    data_ext[:N-1] = data[kept_idx]
-    # estimated model with remove data point
-    mest = np.linalg.lstsq(A_ext,data_ext)[0]
-    # prediction for the removed data point
-    pred = A[removed_idx,:].dot(mest)
-    residual[removed_idx] = pred - data[removed_idx]     
+  # make sure folds is smaller than the number of data points
+  fold = min(fold,N)
 
-  return residual.dot(residual)/N
+  res = np.zeros(N)
+  for rmidx in chunkify(range(N),fold):
+    # build weight matrix. data points are excluded by given them zero 
+    # weight
+    weight = np.ones(N)
+    weight[rmidx] = 0.0
+    
+    A_new = weight[:,None]*A
+    data_new = weight*data
 
-@funtime
-def predictive_error(alpha,A,L,data,gcv=True):
-  if gcv:
-    return gcv_predictive_error(alpha,A,L,data)
+    soln = dense_direct_solve(A_new,L,data_new)
+    pred = A.dot(soln)
+
+    res[rmidx] = pred[rmidx] - data[rmidx]     
+
+  return res.dot(res)/N
+
+
+def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
+  ''' 
+  Description
+  -----------
+    Computes the predictive error for the given damping parameter(s).
+  
+  Parameters
+  ----------
+    damping: damping parameter or list of damping parameters for each 
+      regularization matrix in L
+
+    A: (N,M) sparse system matrix
+
+    L: (K,M) regularization matrix or list of regularization matrices
+
+    data: (N,) data array
+
+    fold (default=10): number of cross validation folds
+   
+    dsolve (default=True): use a direct LU factorization to solve. 
+      An iterative solve is used otherwise.
+
+  Note
+  ----
+    additional key word arguments are passed to the solver
+  '''
+  # make input a list if it is not already
+  if not hasattr(damping,'__iter__'):
+    damping = [damping]
+    L = [L]
+
+  if len(damping) != len(L):
+    raise ValueError(
+      'number of damping parameters must equal number of '
+      'regularization matrices')
+
+  if not all(np.isscalar(d) for d in damping):
+    raise TypeError(
+      'damping must be a scalar or list of scalars')
+
+  if not all(isspmatrix(k) for k in L):
+    raise TypeError(
+      'L must be a sparse matrix or list of sparse matrices')
+
+  if not isspmatrix(A):
+    raise TypeError(
+      'A must be a sparse matrix or list of sparse matrices')
+  
+  # scale regularization matrices. note that this makes copies 
+  L = [k*d for d,k in zip(damping,L)]
+
+  # stack regularization matrices
+  L = scipy.sparse.vstack(L)
+  
+  N = A.shape[0]  
+  K = L.shape[0]
+  # make sure folds is smaller than the number of data points
+  fold = min(fold,N)
+
+  # empty residual vector
+  res = np.zeros(N)
+
+  for rmidx in chunkify(range(N),fold):
+    # build weight matrix. data points are excluded by given them zero 
+    # weight
+    diag = np.ones(N)
+    diag[rmidx] = 0.0
+    W = scipy.sparse.diags(diag,0)
+    
+    # note that there are multiple matrix copies made here
+    A_new = W.dot(A)
+    data_new = W.dot(data)
+
+    if dsolve:
+      soln = sparse_direct_solve(A_new,L,data_new,**kwargs)
+      pred = A.dot(soln)
+      
+    else:
+      soln = sparse_iter_solve(A_new,L,data_new,**kwargs)
+      pred = A.dot(soln)
+
+    res[rmidx] = pred[rmidx] - data[rmidx]     
+
+  return res.dot(res)/N
+
+
+def predictive_error(damping,A,L,data,fold=10,**kwargs):
+  if isspmatrix(A):
+    return sparse_cv_predictive_error(damping,A,L,data,fold=fold,**kwargs)
   else:
-    return cv_predictive_error(alpha,A,L,data)
+    return dense_cv_predictive_error(damping,A,L,data,fold=fold,**kwargs)
 
 
-def _log_predictive_error(log_alpha,A,L,data,gcv=True):
-  return predictive_error(10**log_alpha,A,L,data,gcv=gcv)
-
-
-@funtime
-def optimal_damping(A,L,data,plot=False,gcv=False,log_bounds=None,itr=100):
+def optimal_damping_parameters(A,L,data,
+                               fold=10,log_bounds=None,
+                               itr=100,**kwargs):
   ''' 
   returns the optimal penalty parameter for regularized least squares 
   using generalized cross validation
@@ -99,30 +285,79 @@ def optimal_damping(A,L,data,plot=False,gcv=False,log_bounds=None,itr=100):
   Parameters
   ----------
     A: (N,M) system matrix
-    L: (K,M) regularization matrix
+    L: list of (K,M) regularization matrices
     data: (N,) data vector
     plot: whether to plot the predictive error curve
+    log_bounds: list of lower and upper bounds for each penalty parameter
 
   '''
-  if log_bounds is None:
-    log_bounds = (-6.0,6.0)
+  # number of damping parameters
+  P = len(L)
 
-  alpha_range = 10**np.linspace(log_bounds[0],log_bounds[1],itr)
-  # predictive error for all tested damping parameters
-  err = np.array([predictive_error(a,A,L,data,gcv=gcv) for a in alpha_range])
-  optimal_alpha = alpha_range[np.argmin(err)]
-  optimal_err = np.min(err)
+  # values range from 0 to 1
+  tests = rbf.halton.halton(itr,P)  
+  
+  # scale tests to the desired bounds
+  if log_bounds is None:
+    log_bounds = [[-6.0,6.0]]*P
+
+  log_bounds = np.asarray(log_bounds)
+  if log_bounds.shape != (P,2):
+    raise TypeError('log_bounds must be a length P list of lower and upper bounds')
+
+  bounds_diff = log_bounds[:,1] - log_bounds[:,0]
+  bounds_min = log_bounds[:,0]
+
+  tests = tests*bounds_diff
+  tests = tests + bounds_min
+  tests = 10**tests
+
+  errs = []
+  for t in tests:
+    errs += [predictive_error(t,A,L,data,fold=fold,**kwargs)]
+
+    best_err = np.min(errs)
+    best_idx = np.argmin(errs)
+    best_test = tests[best_idx]
+    logger.debug('predictive error for damping parameters %s: %s' % (t,errs[0]))
+    logger.debug('best predictive error: %s' % best_err)
+    logger.debug('best damping parameters: %s' % best_test)
+
+  logger.info('best predictive error: %s' % best_err)
+  logger.info('best damping parameters: %s' % best_test)
+
+  return best_test, best_err, tests, np.array(errs)
+
+def optimal_damping_parameter(A,L,data,plot=False,
+                              fold=10,log_bounds=None,
+                              itr=100,**kwargs):
+  ''' 
+  used when only searching for one penalty parameter
+  '''
+  if log_bounds is None:
+    log_bounds = [-6.0,6.0]
+
+  out = optimal_damping_parameters(A,[L],data,fold=fold,
+                                   log_bounds=[log_bounds],
+                                   itr=itr,**kwargs)
+  best_test,best_err,tests,errs = out
+  best_test = best_test[0]
+  tests = tests[:,0]
+
   if plot:
+    # sort for plotting purposes
+    sort_idx = np.argsort(tests)
+    tests = tests[sort_idx]
+    errs = errs[sort_idx]
+
     fig,ax = plt.subplots()
-    if gcv:
-      ax.set_title('GCV curve')
-    else:
-      ax.set_title('CV curve')
+    ax.set_title('%s-fold cross validation curve' % fold)
     ax.set_ylabel('predictive error')
     ax.set_xlabel('penalty parameter')
-    ax.loglog(alpha_range,err,'k-')
-    ax.loglog(optimal_alpha,optimal_err,'ko',markersize=10) 
+    ax.loglog(tests,errs,'k-')
+    ax.loglog(best_test,best_err,'ko',markersize=10) 
     ax.grid()
+    plt.show()
     
-  return optimal_alpha
+  return best_test, best_err, tests, np.array(errs)
       
