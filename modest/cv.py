@@ -7,8 +7,11 @@ from scipy.sparse import isspmatrix
 import scipy.sparse.linalg as spla
 import scipy.optimize 
 import matplotlib.pyplot as plt 
+import matplotlib.tri as tri
 import logging 
 import rbf.halton
+from myplot.cm import viridis
+from myplot.colorbar import pseudo_transparent_cmap
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,19 @@ def sparse_iter_solve(A,L,data,**kwargs):
 
 
 def chunkify(list,N):
-    return [list[i::N] for i in range(N)]
+    # make chunks random
+    list = np.asarray(list)
+    K = list.shape[0]
+
+    # I need a randomly mixed list, but i need to to be mixed the 
+    # same time every time
+    current_random_state = np.random.get_state()
+    np.random.seed(1)
+    mix_range = np.random.choice(range(K),K,replace=False)
+    np.random.set_state(current_random_state)    
+
+    chunked_mix_range = [mix_range[i::N] for i in range(N)]
+    return [list[c] for c in chunked_mix_range]
 
 
 def product_trace(A,B):
@@ -83,7 +98,7 @@ def gcv_predictive_error(alpha,A,L,data):
     | alpha*L |   = |  0   |
 
   for m, where A is the system matrix and L is the regularization 
-  matrix.  Then this function returns the predictive error of the 
+  matrix. Then this function returns the predictive error of the 
   solution using generalized cross validation
   '''
   # compute generalized inverse
@@ -277,7 +292,7 @@ def predictive_error(damping,A,L,data,fold=10,**kwargs):
 
 def optimal_damping_parameters(A,L,data,
                                fold=10,log_bounds=None,
-                               itr=100,**kwargs):
+                               itr=100,plot=False,**kwargs):
   ''' 
   returns the optimal penalty parameter for regularized least squares 
   using generalized cross validation
@@ -312,23 +327,71 @@ def optimal_damping_parameters(A,L,data,
   tests = tests + bounds_min
   tests = 10**tests
 
-  errs = []
-  for t in tests:
-    errs += [predictive_error(t,A,L,data,fold=fold,**kwargs)]
+  errs = np.zeros(itr)
+  for i,t in enumerate(tests):
+    errs[i] = predictive_error(t,A,L,data,fold=fold,**kwargs)
+    logger.info('calculated %s of %s predictive errors' % ((i+1),itr))
 
-    best_err = np.min(errs)
-    best_idx = np.argmin(errs)
-    best_test = tests[best_idx]
-    logger.debug('predictive error for damping parameters %s: %s' % (t,errs[0]))
-    logger.debug('best predictive error: %s' % best_err)
-    logger.debug('best damping parameters: %s' % best_test)
+  best_err = np.min(errs)
+  best_idx = np.argmin(errs)
+  best_test = tests[best_idx]
 
   logger.info('best predictive error: %s' % best_err)
   logger.info('best damping parameters: %s' % best_test)
 
-  return best_test, best_err, tests, np.array(errs)
+  if (P > 2) & plot:
+    logger.info(
+      'cannot plot predictive error for more than two damping '
+      'parameters')
 
-def optimal_damping_parameter(A,L,data,plot=False,
+  elif (P == 1) & plot:
+    # sort for plotting purposes
+    sort_idx = np.argsort(tests[:,0])
+    tests = tests[sort_idx,:]
+    errs = errs[sort_idx]
+
+    fig,ax = plt.subplots()
+    ax.set_title('%s-fold cross validation curve' % fold)
+    ax.set_ylabel('predictive error')
+    ax.set_xlabel('penalty parameter')
+    ax.loglog(tests[:,0],errs,'k-')
+    ax.loglog(best_test[0],best_err,'ko',markersize=10) 
+    ax.grid(zorder=-1)
+    fig.tight_layout()
+
+  elif (P == 2) & plot:
+    fig,ax = plt.subplots()
+
+    log_tests = np.log10(tests)
+    log_errs = np.log10(errs)
+    vmin = np.min(log_errs)
+    vmax =np.max(log_errs)
+    viridis_alpha = pseudo_transparent_cmap(viridis,0.5)
+    # make triangularization in logspace
+    triangles = tri.Triangulation(log_tests[:,0],log_tests[:,1])
+    # set triangles to linear space
+    triangles.x = tests[:,0]
+    triangles.y = tests[:,1]
+    ax.tripcolor(triangles,log_errs,
+                 vmin=vmin,vmax=vmax,cmap=viridis_alpha,zorder=0)
+    ax.scatter([best_test[0]],[best_test[1]],
+               s=200,c=[np.log10(best_err)],
+               vmin=vmin,vmax=vmax,zorder=2,cmap=viridis)
+    c = ax.scatter(tests[:,0],tests[:,1],s=50,c=log_errs,
+                   vmin=vmin,vmax=vmax,zorder=1,cmap=viridis)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    cbar = fig.colorbar(c)
+    cbar.set_label('log predictive error')
+    ax.set_xlabel('damping parameter 1')
+    ax.set_ylabel('damping parameter 2')
+    ax.grid(zorder=0)
+    fig.tight_layout()
+
+  return best_test, best_err, tests, errs
+
+
+def optimal_damping_parameter(A,L,data,
                               fold=10,log_bounds=None,
                               itr=100,**kwargs):
   ''' 
@@ -343,21 +406,6 @@ def optimal_damping_parameter(A,L,data,plot=False,
   best_test,best_err,tests,errs = out
   best_test = best_test[0]
   tests = tests[:,0]
-
-  if plot:
-    # sort for plotting purposes
-    sort_idx = np.argsort(tests)
-    tests = tests[sort_idx]
-    errs = errs[sort_idx]
-
-    fig,ax = plt.subplots()
-    ax.set_title('%s-fold cross validation curve' % fold)
-    ax.set_ylabel('predictive error')
-    ax.set_xlabel('penalty parameter')
-    ax.loglog(tests,errs,'k-')
-    ax.loglog(best_test,best_err,'ko',markersize=10) 
-    ax.grid()
-    plt.show()
     
-  return best_test, best_err, tests, np.array(errs)
+  return best_test, best_err, tests, errs
       
