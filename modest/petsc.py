@@ -3,6 +3,7 @@
 import numpy as np
 import scipy.sparse
 import logging
+import modest
 try:
   import petsc4py
   petsc4py.init()
@@ -25,10 +26,10 @@ def _monitor(solver, its, fgnorm):
   ''' 
   this function is called for each iteration of a KSP solver
   '''
-  logger.info('residual norm at iteration %s: %.5e' % (its,fgnorm))
+  logger.info('preconditioned residual norm at iteration %s: %.5e' % (its,fgnorm))
 
 
-def petsc_solve(G,d,solver='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=10000,view=False):
+def petsc_solve(G,d,ksp='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=10000,view=False):
   ''' 
   Solves a linear system using PETSc
 
@@ -37,15 +38,16 @@ def petsc_solve(G,d,solver='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=1000
     G: (N,N) CSR sparse matrix
     d: (N,) data vector
 
-    solver (default='preonly'): solve the system with this PETSc 
+    ksp: solve the system with this PETSc 
       routine. See PETSc documentation for a complete list of options.  
-      'preonly' means that the system is solved with just the 
+      'preonly' means that the system is solved with just the
       preconditioner. This is done when the preconditioner is 'lu', 
-      which means that the system is directly solved with LU 
-      factorization. If the system is too large to allow for a direct 
-      solution then use an iterative solver such as 'lgmres' or 'gmres'
+      which means that the system is directly solved with LU
+      factorization. If the system is too large to allow for a direct
+      solution then use an iterative solver such as 'lgmres' or 
+      'gmres'
 
-    pc (default='lu'): type of preconditioner. See PETSc documentation 
+    pc: type of preconditioner. See PETSc documentation 
       for a complete list of options. 'jacobi' seems to work best for 
       iterative solvers. Use 'lu' if the solver is 'preonly'
 
@@ -55,8 +57,8 @@ def petsc_solve(G,d,solver='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=1000
   
     maxiter: maximum number of iterations
 
-    view (default=True): logs information about the solver and 
-      monitor its convergence
+    view: logs information about the solver and monitors its 
+      convergence
 
   '''
   converged_reason_lookup = {
@@ -98,19 +100,19 @@ def petsc_solve(G,d,solver='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=1000
   soln = PETSc.Vec().createWithArray(soln)
 
   # instantiate solver
-  ksp = PETSc.KSP()
-  ksp.create()
-  ksp.setType(solver)
-  ksp.getPC().setType(pc)
-  ksp.setOperators(A)
-  ksp.setTolerances(rtol=rtol,atol=atol,max_it=maxiter)
+  ksp_solver = PETSc.KSP()
+  ksp_solver.create()
+  ksp_solver.setType(ksp)
+  ksp_solver.getPC().setType(pc)
+  ksp_solver.setOperators(A)
+  ksp_solver.setTolerances(rtol=rtol,atol=atol,max_it=maxiter)
   # solve and get information
   if view:  
-    ksp.view()
-    ksp.setMonitor(_monitor)
+    ksp_solver.view()
+    ksp_solver.setMonitor(_monitor)
 
-  ksp.solve(d,soln)
-  conv_number = ksp.getConvergedReason()
+  ksp_solver.solve(d,soln)
+  conv_number = ksp_solver.getConvergedReason()
   conv_reason = converged_reason_lookup[conv_number]
   if conv_number > 0:
     logger.info('KSP solver converged due to %s' % conv_reason)

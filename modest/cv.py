@@ -1,68 +1,18 @@
 #!/usr/bin/env python
 # Generalize Cross Validation
 import numpy as np 
-from numpy.linalg import pinv 
-from numpy.linalg import inv 
 from scipy.sparse import isspmatrix 
-import scipy.sparse.linalg as spla
 import scipy.optimize 
 import matplotlib.pyplot as plt 
 import matplotlib.tri as tri
 import logging 
 import rbf.halton
 from myplot.cm import viridis
+import modest.petsc
+import modest.solvers
 from myplot.colorbar import pseudo_transparent_cmap
 
 logger = logging.getLogger(__name__)
-
-
-def dense_direct_solve(A,L,data):
-  lhs = A.T.dot(A) + L.T.dot(L)
-  rhs = A.T.dot(data)
-  return np.linalg.solve(lhs,rhs)
-
-
-def sparse_direct_solve(A,L,data,**kwargs):
-  ''' 
-  solves the least squares problem with LU factorization
-  '''
-  A = A.tocsr()
-  L = L.tocsr()
-  lhs = A.T.dot(A) + L.T.dot(L)
-  rhs = A.T.dot(data) 
-  soln = spla.spsolve(lhs,rhs,**kwargs)
-  return soln
-
-
-def sparse_iter_solve(A,L,data,**kwargs):
-  ''' 
-  solves the least squares problem with lsqr
-  '''
-  msg = {0:'The exact solution is  x = 0',
-         1:'Ax - b is small enough, given atol, btol',
-         2:'The least-squares solution is good enough, given atol',
-         3:'The estimate of cond(Abar) has exceeded conlim',
-         4:'Ax - b is small enough for this machine',
-         5:'The least-squares solution is good enough for this machine',
-         6:'Cond(Abar) seems to be too large for this machine',
-         7:'The iteration limit has been reached',
-         8:'The truncated direct error is small enough, given etol'}
-
-  A = A.tocsr()
-  L = L.tocsr()
-  A_ext = scipy.sparse.vstack((A,L))
-  data_ext = np.concatenate((data,np.zeros(L.shape[0])))
-  out = spla.lsqr(A_ext,data_ext,**kwargs)
-  soln = out[0]
-  istop = out[1]
-  if istop not in [1,2]:
-    print('WARNING: %s' % msg[istop])
-    logger.warning(msg[istop])
-
-  else:
-    logger.info(msg[istop])
-
-  return soln
 
 
 def chunkify(list,N):
@@ -81,54 +31,7 @@ def chunkify(list,N):
     return [list[c] for c in chunked_mix_range]
 
 
-def product_trace(A,B):
-  ''' 
-  efficiently returns the trace of a matrix product
-  '''
-  return np.sum(A*B.T)
-
-
-def gcv_predictive_error(alpha,A,L,data):
-  ''' 
-  DEPRICATED 
- 
-  solves 
-
-    |   A     | m = | data |
-    | alpha*L |   = |  0   |
-
-  for m, where A is the system matrix and L is the regularization 
-  matrix. Then this function returns the predictive error of the 
-  solution using generalized cross validation
-  '''
-  # compute generalized inverse
-  try:
-    # compute the inverse with the pseudo inverse, which is more 
-    # stable because singular values are removed
-    ATA = A.T.dot(A)
-    LTL = alpha**2*L.T.dot(L)
-    A_ginv = pinv(ATA + LTL).dot(A.T)
-  except np.linalg.linalg.LinAlgError:
-    # if the generalized inverse cant be computed then the predictive
-    # error is infinite
-    print('WARNING: failed to compute generalized inverse with damping parameter %s' % alpha)
-    return np.inf
-
-  # estimate m
-  m = A_ginv.dot(data)
-
-  # compute misfit
-  predicted = A.dot(m)
-  residual = predicted - data
-  misfit = residual.dot(residual)
-
-  # compute predictive error
-  numerator = len(data)*misfit
-  denominator = (len(data) - product_trace(A,A_ginv))**2
-  return numerator/denominator
-
-
-def dense_cv_predictive_error(damping,A,L,data,fold=10):
+def dense_predictive_error(damping,A,L,data,fold=10):
   ''' 
   Description
   -----------
@@ -136,29 +39,17 @@ def dense_cv_predictive_error(damping,A,L,data,fold=10):
   
   Parameters
   ----------
-    damping: damping parameter or list of damping parameters for each 
-      regularization matrix in L
+    damping: list of damping parameters for each regularization matrix 
 
     A: (N,M) dense system matrix
 
-    L: (K,M) regularization matrix or list of regularization matrices
+    L: list of regularization matrices
 
     data: (N,) data array
 
     fold (default=10): number of cross validation folds
-   
-    dsolve (default=True): use a direct LU factorization to solve. 
-      An iterative solve is used otherwise.
 
-  Note
-  ----
-    additional key word arguments are passed to the solver
   '''
-  # make input a list if it is not already
-  if not hasattr(damping,'__iter__'):
-    damping = [damping]
-    L = [L]
-
   if len(damping) != len(L):
     raise ValueError(
       'number of damping parameters must equal number of '
@@ -175,7 +66,6 @@ def dense_cv_predictive_error(damping,A,L,data,fold=10):
   L = np.vstack(L)
 
   N = A.shape[0]  
-  K = L.shape[0]
   # make sure folds is smaller than the number of data points
   fold = min(fold,N)
 
@@ -189,7 +79,7 @@ def dense_cv_predictive_error(damping,A,L,data,fold=10):
     A_new = weight[:,None]*A
     data_new = weight*data
 
-    soln = dense_direct_solve(A_new,L,data_new)
+    soln = modest.solvers.reg_ds(A_new,L,data_new)
     pred = A.dot(soln)
 
     res[rmidx] = pred[rmidx] - data[rmidx]     
@@ -197,7 +87,7 @@ def dense_cv_predictive_error(damping,A,L,data,fold=10):
   return res.dot(res)/N
 
 
-def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
+def sparse_predictive_error(damping,A,L,data,fold=10,solver='spsolve',**kwargs):
   ''' 
   Description
   -----------
@@ -205,29 +95,30 @@ def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
   
   Parameters
   ----------
-    damping: damping parameter or list of damping parameters for each 
-      regularization matrix in L
+    damping: list of damping parameters for each regularization matrix 
 
     A: (N,M) sparse system matrix
 
-    L: (K,M) regularization matrix or list of regularization matrices
+    L: list of regularization matrices
 
     data: (N,) data array
 
     fold (default=10): number of cross validation folds
    
-    dsolve (default=True): use a direct LU factorization to solve. 
-      An iterative solve is used otherwise.
+    solver: which solver to use. choices are
+      'spsolve': scipy.spares.linalg.spsolve
+      'lgmres': scipy.sparse.linalg.lgmres
+      'lsqr': scipy.sparse.linalg.lsqr
+      'petsc': modest.petsc.petsc_solve  
 
-  Note
-  ----
-    additional key word arguments are passed to the solver
+      additional key word arguments are passed to the solver
+    
   '''
-  # make input a list if it is not already
-  if not hasattr(damping,'__iter__'):
-    damping = [damping]
-    L = [L]
-
+  solver_dict = {'spsolve':modest.solvers.sparse_reg_ds,
+                 'lgmres':modest.solvers.sparse_reg_lgmres,
+                 'lsqr':modest.solvers.sparse_reg_lsqr,
+                 'petsc':modest.solvers.sparse_reg_petsc}
+ 
   if len(damping) != len(L):
     raise ValueError(
       'number of damping parameters must equal number of '
@@ -235,24 +126,23 @@ def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
 
   if not all(np.isscalar(d) for d in damping):
     raise TypeError(
-      'damping must be a scalar or list of scalars')
+      'damping must be a list of scalars')
 
   if not all(isspmatrix(k) for k in L):
     raise TypeError(
-      'L must be a sparse matrix or list of sparse matrices')
+      'L must be a list of sparse matrices')
 
   if not isspmatrix(A):
     raise TypeError(
-      'A must be a sparse matrix or list of sparse matrices')
+      'A must be a list of sparse matrices')
   
   # scale regularization matrices. note that this makes copies 
-  L = [k*d for d,k in zip(damping,L)]
+  L = (k*d for d,k in zip(damping,L))
 
   # stack regularization matrices
   L = scipy.sparse.vstack(L)
   
   N = A.shape[0]  
-  K = L.shape[0]
   # make sure folds is smaller than the number of data points
   fold = min(fold,N)
 
@@ -260,7 +150,7 @@ def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
   res = np.zeros(N)
 
   for rmidx in chunkify(range(N),fold):
-    # build weight matrix. data points are excluded by given them zero 
+    # build weight matrix. data points are excluded by giving them zero 
     # weight
     diag = np.ones(N)
     diag[rmidx] = 0.0
@@ -270,13 +160,8 @@ def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
     A_new = W.dot(A)
     data_new = W.dot(data)
 
-    if dsolve:
-      soln = sparse_direct_solve(A_new,L,data_new,**kwargs)
-      pred = A.dot(soln)
-      
-    else:
-      soln = sparse_iter_solve(A_new,L,data_new,**kwargs)
-      pred = A.dot(soln)
+    soln = solver_dict[solver](A_new,L,data_new,**kwargs)
+    pred = A.dot(soln)
 
     res[rmidx] = pred[rmidx] - data[rmidx]     
 
@@ -285,9 +170,9 @@ def sparse_cv_predictive_error(damping,A,L,data,fold=10,dsolve=True,**kwargs):
 
 def predictive_error(damping,A,L,data,fold=10,**kwargs):
   if isspmatrix(A):
-    return sparse_cv_predictive_error(damping,A,L,data,fold=fold,**kwargs)
+    return sparse_predictive_error(damping,A,L,data,fold=fold,**kwargs)
   else:
-    return dense_cv_predictive_error(damping,A,L,data,fold=fold,**kwargs)
+    return dense_predictive_error(damping,A,L,data,fold=fold,**kwargs)
 
 
 def optimal_damping_parameters(A,L,data,
@@ -379,6 +264,7 @@ def optimal_damping_parameters(A,L,data,
                vmin=vmin,vmax=vmax,zorder=2,cmap=viridis)
     c = ax.scatter(tests[:,0],tests[:,1],s=50,c=log_errs,
                    vmin=vmin,vmax=vmax,zorder=1,cmap=viridis)
+    ax.set_title('%s-fold cross validation curve' % fold)
     ax.set_xscale('log')
     ax.set_yscale('log')
     cbar = fig.colorbar(c)
@@ -408,4 +294,5 @@ def optimal_damping_parameter(A,L,data,
   tests = tests[:,0]
     
   return best_test, best_err, tests, errs
+
       
