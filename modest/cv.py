@@ -10,6 +10,7 @@ import rbf.halton
 from myplot.cm import viridis
 import modest.petsc
 import modest.solvers
+import modest.mp
 from myplot.colorbar import pseudo_transparent_cmap
 
 logger = logging.getLogger(__name__)
@@ -55,9 +56,18 @@ def dense_predictive_error(damping,A,L,data,fold=10):
       'number of damping parameters must equal number of '
       'regularization matrices')
 
-  if not all(np.isscalar(d) for d in damping):
-    raise TypeError(
-      'damping must be a scalar or list of scalars')
+  A = np.asarray(A)
+  L = [np.asarray(k) for l in L]
+  data = np.asarray(data)
+  N = data.shape[0]
+
+  if hasattr(fold,'__iter__'):
+    testing_sets = fold
+
+  else:
+    fold = min(fold,N) # make sure folds is smaller than the number of data points
+    testing_sets = chunkify(range(N),fold)
+
 
   # scale regularization matrices. note that this makes copies 
   L = [k*d for d,k in zip(damping,L)]
@@ -65,19 +75,18 @@ def dense_predictive_error(damping,A,L,data,fold=10):
   # stack regularization matrices
   L = np.vstack(L)
 
-  N = A.shape[0]  
   # make sure folds is smaller than the number of data points
   fold = min(fold,N)
 
   res = np.zeros(N)
-  for rmidx in chunkify(range(N),fold):
-    # build weight matrix. data points are excluded by given them zero 
-    # weight
-    weight = np.ones(N)
-    weight[rmidx] = 0.0
+  for rmidx in testing_sets:
+    # build weight matrix. data points are excluded by given them 
+    # nearly zero weight
+    W = np.ones(N)
+    W[rmidx] = 1e-10
     
-    A_new = weight[:,None]*A
-    data_new = weight*data
+    A_new = W[:,None]*A
+    data_new = W*data
 
     soln = modest.solvers.reg_ds(A_new,L,data_new)
     pred = A.dot(soln)
@@ -103,8 +112,13 @@ def sparse_predictive_error(damping,A,L,data,fold=10,solver='spsolve',**kwargs):
 
     data: (N,) data array
 
-    fold (default=10): number of cross validation folds
-   
+    fold (default=10): number of cross validation testing sets. The 
+      data is randomly split into the desired number of testing sets. 
+      If you want more control over which data points are in which testing 
+      set then fold can also be specified as a list of testing set 
+      indices.  For example, if there are 5 data points then fold can 
+      be specified as [[0,1],[2,3],[4]] which does 3-fold cross validation.
+
     solver: which solver to use. choices are
       'spsolve': scipy.spares.linalg.spsolve
       'lgmres': scipy.sparse.linalg.lgmres
@@ -124,10 +138,6 @@ def sparse_predictive_error(damping,A,L,data,fold=10,solver='spsolve',**kwargs):
       'number of damping parameters must equal number of '
       'regularization matrices')
 
-  if not all(np.isscalar(d) for d in damping):
-    raise TypeError(
-      'damping must be a list of scalars')
-
   if not all(isspmatrix(k) for k in L):
     raise TypeError(
       'L must be a list of sparse matrices')
@@ -136,24 +146,30 @@ def sparse_predictive_error(damping,A,L,data,fold=10,solver='spsolve',**kwargs):
     raise TypeError(
       'A must be a list of sparse matrices')
   
+  data = np.asarray(data)
+  N = data.shape[0]
+
+  if hasattr(fold,'__iter__'):
+    testing_sets = fold
+
+  else:
+    fold = min(fold,N) # make sure folds is smaller than the number of data points
+    testing_sets = chunkify(range(N),fold)
+
   # scale regularization matrices. note that this makes copies 
   L = (k*d for d,k in zip(damping,L))
 
   # stack regularization matrices
   L = scipy.sparse.vstack(L)
   
-  N = A.shape[0]  
-  # make sure folds is smaller than the number of data points
-  fold = min(fold,N)
-
   # empty residual vector
   res = np.zeros(N)
 
-  for rmidx in chunkify(range(N),fold):
+  for rmidx in testing_sets:
     # build weight matrix. data points are excluded by giving them zero 
     # weight
     diag = np.ones(N)
-    diag[rmidx] = 0.0
+    diag[rmidx] = 1e-100
     W = scipy.sparse.diags(diag,0)
     
     # note that there are multiple matrix copies made here
@@ -174,10 +190,23 @@ def predictive_error(damping,A,L,data,fold=10,**kwargs):
   else:
     return dense_predictive_error(damping,A,L,data,fold=fold,**kwargs)
 
+def mappable_predictive_error(args):
+  damping = args[0]
+  A = args[1]
+  L = args[2]
+  data = args[3]
+  fold = args[4]
+  kwargs = args[5]
+  index = args[6]  
+  total = args[7]
+  out = predictive_error(damping,A,L,data,fold=fold,**kwargs)
+  logger.info('computed predictive error %s of %s' % (index,total))
+  return out
 
 def optimal_damping_parameters(A,L,data,
                                fold=10,log_bounds=None,
-                               itr=100,plot=False,**kwargs):
+                               itr=100,Nprocs=None,plot=False,
+                               **kwargs):
   ''' 
   returns the optimal penalty parameter for regularized least squares 
   using generalized cross validation
@@ -212,10 +241,9 @@ def optimal_damping_parameters(A,L,data,
   tests = tests + bounds_min
   tests = 10**tests
 
-  errs = np.zeros(itr)
-  for i,t in enumerate(tests):
-    errs[i] = predictive_error(t,A,L,data,fold=fold,**kwargs)
-    logger.info('calculated %s of %s predictive errors' % ((i+1),itr))
+  args = ((t,A,L,data,fold,kwargs,i,len(tests)) for i,t in enumerate(tests))
+  errs = modest.mp.parmap(mappable_predictive_error,args,Nprocs=Nprocs)
+  errs = np.asarray(errs)
 
   best_err = np.min(errs)
   best_idx = np.argmin(errs)
@@ -236,7 +264,10 @@ def optimal_damping_parameters(A,L,data,
     errs = errs[sort_idx]
 
     fig,ax = plt.subplots()
-    ax.set_title('%s-fold cross validation curve' % fold)
+    if hasattr(fold,'__iter__'):
+      ax.set_title('%s-fold cross validation curve' % len(fold))
+    else:
+      ax.set_title('%s-fold cross validation curve' % fold)
     ax.set_ylabel('predictive error')
     ax.set_xlabel('penalty parameter')
     ax.loglog(tests[:,0],errs,'k-')
@@ -252,19 +283,25 @@ def optimal_damping_parameters(A,L,data,
     vmin = np.min(log_errs)
     vmax =np.max(log_errs)
     viridis_alpha = pseudo_transparent_cmap(viridis,0.5)
-    # make triangularization in logspace
-    triangles = tri.Triangulation(log_tests[:,0],log_tests[:,1])
-    # set triangles to linear space
-    triangles.x = tests[:,0]
-    triangles.y = tests[:,1]
-    ax.tripcolor(triangles,log_errs,
-                 vmin=vmin,vmax=vmax,cmap=viridis_alpha,zorder=0)
+    # if fewer than three tests were made then do not triangulate
+    if tests.shape[0] >= 3:
+      # make triangularization in logspace
+      triangles = tri.Triangulation(log_tests[:,0],log_tests[:,1])
+      # set triangles to linear space
+      triangles.x = tests[:,0]
+      triangles.y = tests[:,1]
+      ax.tripcolor(triangles,log_errs,
+                   vmin=vmin,vmax=vmax,cmap=viridis_alpha,zorder=0)
+     
     ax.scatter([best_test[0]],[best_test[1]],
                s=200,c=[np.log10(best_err)],
                vmin=vmin,vmax=vmax,zorder=2,cmap=viridis)
     c = ax.scatter(tests[:,0],tests[:,1],s=50,c=log_errs,
                    vmin=vmin,vmax=vmax,zorder=1,cmap=viridis)
-    ax.set_title('%s-fold cross validation curve' % fold)
+    if hasattr(fold,'__iter__'):
+      ax.set_title('%s-fold cross validation curve' % len(fold))
+    else:
+      ax.set_title('%s-fold cross validation curve' % fold)
     ax.set_xscale('log')
     ax.set_yscale('log')
     cbar = fig.colorbar(c)

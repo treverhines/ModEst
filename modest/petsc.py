@@ -4,6 +4,7 @@ import numpy as np
 import scipy.sparse
 import logging
 import modest
+import matplotlib.pyplot as plt
 try:
   import petsc4py
   petsc4py.init()
@@ -29,7 +30,7 @@ def _monitor(solver, its, fgnorm):
   logger.info('preconditioned residual norm at iteration %s: %.5e' % (its,fgnorm))
 
 
-def petsc_solve(G,d,ksp='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=10000,view=False):
+def petsc_solve(G,d,ksp='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=1000,view=False):
   ''' 
   Solves a linear system using PETSc
 
@@ -87,8 +88,13 @@ def petsc_solve(G,d,ksp='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=10000,v
     logger.info('system matrix is dense and will now be converted to a CSR sparse matrix')
     G = scipy.sparse.csr_matrix(G)
 
+  #G += scipy.sparse.diags(1e-10*np.ones(G.shape[0]),0)
   G = G.tocsr() 
 
+  #fig,ax = plt.subplots()
+  #ax.imshow(G.toarray(),interpolation='none') 
+  #plt.show()
+  
   # instantiate LHS
   A = PETSc.Mat().createAIJ(size=G.shape,csr=(G.indptr,G.indices,G.data))
 
@@ -115,7 +121,7 @@ def petsc_solve(G,d,ksp='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=10000,v
   conv_number = ksp_solver.getConvergedReason()
   conv_reason = converged_reason_lookup[conv_number]
   if conv_number > 0:
-    logger.info('KSP solver converged due to %s' % conv_reason)
+    logger.debug('KSP solver converged due to %s' % conv_reason)
   else:
     logger.warning('KSP solver diverged due to %s' % conv_reason)
     print('WARNING: KSP solver diverged due to %s' % conv_reason)
