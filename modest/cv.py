@@ -169,7 +169,7 @@ def sparse_predictive_error(damping,A,L,data,fold=10,solver='spsolve',**kwargs):
     # build weight matrix. data points are excluded by giving them zero 
     # weight
     diag = np.ones(N)
-    diag[rmidx] = 1e-100
+    diag[rmidx] = 1e-10
     W = scipy.sparse.diags(diag,0)
     
     # note that there are multiple matrix copies made here

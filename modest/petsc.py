@@ -109,9 +109,13 @@ def petsc_solve(G,d,ksp='lgmres',pc='jacobi',rtol=1e-6,atol=1e-6,maxiter=1000,vi
   ksp_solver = PETSc.KSP()
   ksp_solver.create()
   ksp_solver.setType(ksp)
-  ksp_solver.getPC().setType(pc)
   ksp_solver.setOperators(A)
   ksp_solver.setTolerances(rtol=rtol,atol=atol,max_it=maxiter)
+
+  pc_solver = ksp_solver.getPC()
+  pc_solver.setType(pc)
+  # set tolerance for zero pivot
+  pc_solver.setFactorPivot(1e-100)
   # solve and get information
   if view:  
     ksp_solver.view()
