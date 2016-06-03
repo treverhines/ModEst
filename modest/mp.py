@@ -35,14 +35,16 @@ def parmap(f,args,Nprocs=None):
     # process is starting and waiting for something to be put on q_in
     p.start()
 
-  for count,a in enumerate(args):
+  count = 0
+  for a in args:
     q_in.put((count,a))
+    count += 1
 
   # indicate that nothing else will be added
   for i in range(Nprocs):
     q_in.put(('DONE',None))
 
-  out = [q_out.get() for i in range(count+1)]
+  out = [q_out.get() for i in range(count)]
 
   # terminate all processes
   for p in procs:

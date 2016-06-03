@@ -25,7 +25,12 @@ def chunkify(list,N):
     # same time every time
     current_random_state = np.random.get_state()
     np.random.seed(1)
-    mix_range = np.random.choice(range(K),K,replace=False)
+    if K > 0:
+      mix_range = np.random.choice(range(K),K,replace=False)
+    else:
+      # np.random.choice does not work for K==0
+      mix_range = np.zeros(0,dtype=int)
+
     np.random.set_state(current_random_state)    
 
     chunked_mix_range = [mix_range[i::N] for i in range(N)]
@@ -70,7 +75,7 @@ def dense_predictive_error(damping,A,L,data,fold=10):
 
 
   # scale regularization matrices. note that this makes copies 
-  L = [k*d for d,k in zip(damping,L)]
+  L = (k*d for d,k in zip(damping,L))
 
   # stack regularization matrices
   L = np.vstack(L)
