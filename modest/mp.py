@@ -15,23 +15,29 @@ class ParmapError(Exception):
     return self.msg
  
 
-def _f(f,q_in,q_out,q_err,workers):
+def _f(f,q_in,q_out,q_err):
   while True:
     i,a = q_in.get()
     if i == 'DONE':
       break
 
     try:
-      q_out.put((i,f(a)))
       # append a None to the error queue which indicates that f was 
       # successfully evaluated
-      q_err.put((i,None))
+      out_entry = f(a)
+      err_entry = None 
 
     except Exception as err:
       # if there is an error append a None to the out queue and append 
-      # the error to the error queue
-      q_err.put((i,err))
-      q_out.put((i,None))
+      # the error to the error queue. An error will be raised when all 
+      # tasks are completed
+      print('WARNING: an error was raised for task %s' % i)
+
+      out_entry = None 
+      err_entry = err
+
+    q_out.put((i,out_entry))
+    q_err.put((i,err_entry))
 
 
 def parmap(f,args,workers=None):
@@ -69,7 +75,7 @@ def parmap(f,args,workers=None):
   # spawn worker processes
   procs = []
   for i in range(workers):
-    p = Process(target=_f,args=(f,q_in,q_out,q_err,workers))
+    p = Process(target=_f,args=(f,q_in,q_out,q_err))
     # process is starting and waiting for something to be put on q_in
     p.start()
     procs += [p] 

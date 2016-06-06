@@ -210,7 +210,7 @@ def mappable_predictive_error(args):
 
 def optimal_damping_parameters(A,L,data,
                                fold=10,log_bounds=None,
-                               itr=100,Nprocs=None,plot=False,
+                               itr=100,procs=None,plot=False,
                                **kwargs):
   ''' 
   returns the optimal penalty parameter for regularized least squares 
@@ -247,7 +247,7 @@ def optimal_damping_parameters(A,L,data,
   tests = 10**tests
 
   args = ((t,A,L,data,fold,kwargs,i,len(tests)) for i,t in enumerate(tests))
-  errs = modest.mp.parmap(mappable_predictive_error,args,Nprocs=Nprocs)
+  errs = modest.mp.parmap(mappable_predictive_error,args,workers=procs)
   errs = np.asarray(errs)
 
   best_err = np.min(errs)
