@@ -140,7 +140,7 @@ def bvls(G,d,lower_lim,upper_lim):
   return soln
 
 @_arg_checker
-def ds(G,d,*args,**kwargs):
+def dsolve(G,d,*args,**kwargs):
   ''' 
   multiply the lhs and rhs by G.T and then use a direct solver
   '''
@@ -150,13 +150,13 @@ def ds(G,d,*args,**kwargs):
 # regularization constraints
 #####################################################################
 @_reg_arg_checker
-def reg_ds(A,L,data):
+def reg_dsolve(A,L,data):
   lhs = A.T.dot(A) + L.T.dot(L)
   rhs = A.T.dot(data)
   return np.linalg.solve(lhs,rhs)
 
 @_reg_arg_checker
-def sparse_reg_ds(A,L,data,**kwargs):
+def sparse_reg_dsolve(A,L,data,**kwargs):
   ''' 
   solves the least squares problem with LU factorization
   '''
