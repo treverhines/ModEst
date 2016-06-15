@@ -93,7 +93,7 @@ def dense_predictive_error(damping,A,L,data,fold=10):
     A_new = W[:,None]*A
     data_new = W*data
 
-    soln = modest.solvers.reg_ds(A_new,L,data_new)
+    soln = modest.solvers.reg_dsolve(A_new,L,data_new)
     pred = A.dot(soln)
 
     res[rmidx] = pred[rmidx] - data[rmidx]     
@@ -133,7 +133,7 @@ def sparse_predictive_error(damping,A,L,data,fold=10,solver='spsolve',**kwargs):
       additional key word arguments are passed to the solver
     
   '''
-  solver_dict = {'spsolve':modest.solvers.sparse_reg_ds,
+  solver_dict = {'spsolve':modest.solvers.sparse_reg_dsolve,
                  'lgmres':modest.solvers.sparse_reg_lgmres,
                  'lsqr':modest.solvers.sparse_reg_lsqr,
                  'petsc':modest.solvers.sparse_reg_petsc}
